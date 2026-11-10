@@ -78,6 +78,7 @@
 #endif 
 
 #define BUTTON_STATE_ARRAY_LENGTH 31
+#define MAX_DATAPOINTS 1000
 
 typedef enum {BUTTON, WEIGHT, TIME, DISCONNECT, UNDEF} ENDTYPE;
 
@@ -98,6 +99,7 @@ float currentWeight = 0;
 uint8_t goalWeight = 0;      // Goal Weight to be read from EEPROM
 float weightOffset = 0;
 float error = 0;
+tare_state lastTareState = TARE_IDLE;
 int buttonArr[BUTTON_STATE_ARRAY_LENGTH];            // last 4 readings of the button
 
 // button 
@@ -112,8 +114,8 @@ struct Shot {
   float shotTimer;         // Reset when the final drip measurement is made
   float end_s;             // Number of seconds after the shot started
   float expected_end_s;    // Estimated duration of the shot
-  float weight[1000];      // A scatter plot of the weight measurements, along with time_s[]
-  float time_s[1000];      // Number of seconds after the shot starte
+  float weight[MAX_DATAPOINTS]; // A scatter plot of the weight measurements, along with time_s[]
+  float time_s[MAX_DATAPOINTS]; // Number of seconds after the shot started
   int datapoints;          // Number of datapoitns in the scatter plot
   bool brewing;            // True when actively brewing, otherwise false
   ENDTYPE end;
@@ -128,7 +130,7 @@ BLEByteCharacteristic weightCharacteristic("0xFF11",  BLEWrite | BLERead);
 
 void setup() {
   setCpuFrequencyMhz(80);
-  Serial.begin(9600);
+  Serial.begin(115200); // per-packet logging at 9600 baud adds loop latency
   EEPROM.begin(EEPROM_SIZE);
 
   // Get stored setpoint and offset
@@ -137,7 +139,7 @@ void setup() {
   Serial.print("Goal Weight retrieved: ");
   Serial.println(goalWeight);
   Serial.print("offset retrieved: ");
-  Serial.println(goalWeight);
+  Serial.println(weightOffset);
 
   //If eeprom isn't initialized and has an 
   // unreasonable weight/offset, default to 36g/1.5g
@@ -199,15 +201,19 @@ void setBrewingState(bool brewing){
     shot.start_timestamp_s = seconds_f();
     shot.shotTimer = 0;
     shot.datapoints = 0;
+    shot.expected_end_s = MAX_SHOT_DURATION_S; // don't reuse the previous shot's prediction
     if (CAN_TARE_START_TIMER && AUTOTARE) {
       scale.tareStartTimer();
     } else {
-      scale.resetTimer();
-      scale.startTimer();
+      // Tare first: it is the command that matters for brew-by-weight.
+      // The library spaces the commands and verifies the tare.
       if(AUTOTARE){
         scale.tare();
       }
+      scale.resetTimer();
+      scale.startTimer();
     }
+    lastTareState = TARE_IDLE; // so the next TARE_CONFIRMED is seen as a transition
     Serial.println("Weight Timer End");
   }else{
     Serial.print("ShotEnded by ");
@@ -309,6 +315,13 @@ void scaleConnected_task(){
     scale.heartbeat();
   }
 
+  // Advance the shot timer in real time, not only when a weight packet
+  // arrives. Otherwise a stalled weight stream freezes the timer and neither
+  // the predicted end time nor MAX_SHOT_DURATION_S can end the shot.
+  if(shot.brewing){
+    shot.shotTimer = seconds_f() - shot.start_timestamp_s;
+  }
+
   // always call newWeightAvailable to actually receive the datapoint from the scale,
   // otherwise getWeight() will return stale data
   if(scale.newWeightAvailable()){
@@ -320,11 +333,21 @@ void scaleConnected_task(){
       setColor(GREEN);
     }
 
+    // Readings taken before the tare took effect include the cup; drop them
+    // so they don't skew the trend line.
+    tare_state tareNow = scale.tareState();
+    if(shot.brewing && AUTOTARE && tareNow == TARE_CONFIRMED && lastTareState != TARE_CONFIRMED){
+      shot.datapoints = 0;
+    }
+    if(tareNow == TARE_FAILED && lastTareState != TARE_FAILED){
+      Serial.println("tare failed: brew-by-weight disabled for this shot");
+    }
+    lastTareState = tareNow;
+
     // update shot trajectory
-    if(shot.brewing && !TIMER_ONLY){
+    if(shot.brewing && !TIMER_ONLY && shot.datapoints < MAX_DATAPOINTS){
       shot.time_s[shot.datapoints] = seconds_f()-shot.start_timestamp_s;
       shot.weight[shot.datapoints] = currentWeight;
-      shot.shotTimer = shot.time_s[shot.datapoints];
       shot.datapoints++;
 
       Serial.print(" ");
@@ -429,8 +452,12 @@ void scaleConnected_task(){
   }
 
   //End shot
-  if(!TIMER_ONLY 
-  && shot.brewing 
+  // Only stop by weight once the tare is confirmed: with the cup still on the
+  // scale the trend line predicts an end time in the past and would stop the
+  // shot as soon as MIN_SHOT_DURATION_S is reached.
+  if(!TIMER_ONLY
+  && shot.brewing
+  && (!AUTOTARE || scale.tareState() == TARE_CONFIRMED)
   && shot.shotTimer >= shot.expected_end_s
   && shot.shotTimer >  MIN_SHOT_DURATION_S
   ){

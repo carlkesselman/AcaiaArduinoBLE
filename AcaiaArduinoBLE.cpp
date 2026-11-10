@@ -1,5 +1,5 @@
 /*
-  AcaiaArduinoBLE.cpp - Library for connecting to 
+  AcaiaArduinoBLE.cpp - Library for connecting to
   an Acaia Scale using the ArduinoBLE library.
   Created by Tate Mazer, December 13, 2023.
   Released into the public domain.
@@ -31,7 +31,16 @@ byte STOP_TIMER_FELICITA[1]         = { 0x53 }; // 'Stop_Timer'
 byte RESET_TIMER_FELICITA[1]        = { 0x43 }; // 'Reset_Timer'
 byte WEIGHT_TIMER_MODE_FELICITA[1]  = { 0x32 }; // 'Weight+timer mode (known-good wake state)
 
-// Helper struct layout to enable BLEWriteWithoutResponse (0x04) in stock ArduinoBLE
+// Acaia framing: ef dd <cmd> <len> ... <ck1> <ck2>
+//   total message length = len + 5
+//   ck1/ck2 = sums of the even/odd bytes from <len> up to (not including) ck1
+#define ACAIA_HEADER1      0xef
+#define ACAIA_HEADER2      0xdd
+#define ACAIA_CMD_EVENT    0x0c
+#define ACAIA_EVENT_WEIGHT 0x05
+
+// Helper struct layout to enable BLEWriteWithoutResponse (0x04) in stock ArduinoBLE.
+// Matches ArduinoBLE 2.x (BLECharacteristic / BLERemoteAttribute / BLERemoteCharacteristic).
 struct RemoteCharAccess {
     void* vtable;
     String uuid;
@@ -50,34 +59,72 @@ struct CharAccess {
    https://github.com/graphefruit/Beanconqueror/blob/master/src/classes/devices/felicita/constants.ts
 */
 
+AcaiaArduinoBLE* AcaiaArduinoBLE::_instance = nullptr;
+
 AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug){
     _debug = debug;
     _currentWeight = 0;
+    _newWeight = false;
     _connected = false;
+    _scanning = false;
+    _scanStarted = 0;
+    _type = NEW;
     _packetPeriod = 0;
+    _lastPacket = 0;
+    _lastHeartBeat = 0;
+    _lastCommand = 0;
+    _rxLen = 0;
+    _checksumErrors = 0;
+    _tareState = TARE_IDLE;
+    _tareSent = 0;
+    _tareRetries = 0;
+    _instance = this;
+}
+
+// Called after a connection has been made but setup failed. Always drop the
+// link: a scale that stays connected stops advertising and can never be found
+// again by the next scan.
+bool AcaiaArduinoBLE::fail(BLEDevice& peripheral, const char* msg){
+    Serial.println(msg);
+    peripheral.disconnect();
+    return false;
 }
 
 bool AcaiaArduinoBLE::init(String mac){
+    if(_connected){
+        return true;
+    }
 
-    Serial.print("AcaiaArduinoBLE Library v");
-    Serial.print(LIBRARY_VERSION);
-    Serial.println(" reinitializing...");
+    // Keep scanning between calls so advertisements that arrive while the
+    // caller is doing other work are not missed. Restart the scan
+    // periodically to clear the controller's duplicate filter.
+    unsigned long now = millis();
+    if(!_scanning || now - _scanStarted > SCAN_RESTART_MS){
+        if(!_scanning){
+            Serial.print("AcaiaArduinoBLE Library v");
+            Serial.print(LIBRARY_VERSION);
+            Serial.println(" scanning...");
+        }else{
+            BLE.stopScan();
+        }
+        int ok = (mac == "") ? BLE.scan() : BLE.scanForAddress(mac);
+        if(!ok){
+            Serial.println("failed to start scan");
+            _scanning = false;
+            return false;
+        }
+        _scanning = true;
+        _scanStarted = now;
+    }
 
     unsigned long start = millis();
-    _lastPacket = 0;
-
-    if (mac == ""){
-        BLE.scan();
-    }else if (!BLE.scanForAddress(mac)){
-        Serial.print("Failed to find ");
-        Serial.println(mac);
-        return false;
-    }
-    
     do{
         BLEDevice peripheral = BLE.available();
+        if(!peripheral){
+            continue;
+        }
 
-        if(_debug && peripheral){
+        if(_debug){
             // discovered a peripheral, print out address, local name, and advertised service
             Serial.print("Found ");
             Serial.print(peripheral.address());
@@ -88,327 +135,541 @@ bool AcaiaArduinoBLE::init(String mac){
             Serial.println();
         }
 
-        if (peripheral && isScaleName(peripheral.localName())) {
-            BLE.stopScan();
+        if(!isScaleName(peripheral.localName())){
+            continue;
+        }
 
-            Serial.println("Connecting ...");
-            if (peripheral.connect()) {
-                Serial.println("Connected");
-            } else {
-                Serial.println("Failed to connect!");
-                return false;
-            }
+        BLE.stopScan();
+        _scanning = false;
 
-            Serial.println("Discovering attributes ...");
-            if (peripheral.discoverAttributes()) {
-                Serial.println("Attributes discovered");;
-            } else {
-                Serial.println("Attribute discovery failed!");
-                peripheral.disconnect();
-                return false;
-            }
+        Serial.println("Connecting ...");
+        if (peripheral.connect()) {
+            Serial.println("Connected");
+        } else {
+            Serial.println("Failed to connect!");
+            return false;
+        }
 
-            if(_debug){
-                // read and print device name of peripheral
-                Serial.println();
-                Serial.print("Device name: ");
-                Serial.println(peripheral.deviceName());
-                Serial.print("Appearance: 0x");
-                Serial.println(peripheral.appearance(), HEX);
-                Serial.println();
+        // From here on every failure must disconnect (see fail()).
+        Serial.println("Discovering attributes ...");
+        if (peripheral.discoverAttributes()) {
+            Serial.println("Attributes discovered");
+        } else {
+            return fail(peripheral, "Attribute discovery failed!");
+        }
 
-                // loop the services of the peripheral and explore each
-                for (int i = 0; i < peripheral.serviceCount(); i++) {
-                    BLEService service = peripheral.service(i);
-                    exploreService(service);
-                }
-            }
+        if(_debug){
+            // read and print device name of peripheral
+            Serial.println();
+            Serial.print("Device name: ");
+            Serial.println(peripheral.deviceName());
+            Serial.print("Appearance: 0x");
+            Serial.println(peripheral.appearance(), HEX);
+            Serial.println();
 
-            // Determine type of scale
-            if(peripheral.characteristic(READ_CHAR_OLD_VERSION).canSubscribe()){
-                Serial.println("Old version Acaia Detected");
-                _type   = OLD;
-                _write  = peripheral.characteristic(WRITE_CHAR_OLD_VERSION);
-                _read   = peripheral.characteristic(READ_CHAR_OLD_VERSION);
-            }else if(peripheral.characteristic(READ_CHAR_NEW_VERSION).canSubscribe()){
-                Serial.println("New version Acaia Detected");
-                _type   = NEW;
-                _write  = peripheral.characteristic(WRITE_CHAR_NEW_VERSION);
-                _read   = peripheral.characteristic(READ_CHAR_NEW_VERSION);
-            } else if(peripheral.characteristic(READ_CHAR_GENERIC).canSubscribe()){
-                Serial.println("Generic Scale Detected");
-                _type   = GENERIC;
-	            _write  = peripheral.characteristic(WRITE_CHAR_GENERIC);
-	            _read   = peripheral.characteristic(READ_CHAR_GENERIC);
-            } else if(peripheral.characteristic(READ_CHAR_FELICITA).canSubscribe()){
-                Serial.println("Felicita Arc Detected");
-                _type   = FELICITA;
-                _write  = peripheral.characteristic(WRITE_CHAR_FELICITA);
-                _read   = peripheral.characteristic(READ_CHAR_FELICITA);
+            // loop the services of the peripheral and explore each
+            for (int i = 0; i < peripheral.serviceCount(); i++) {
+                BLEService service = peripheral.service(i);
+                exploreService(service);
             }
-            else{
-                Serial.println("unable to determine scale type");
-                return false;
-            }
-            // Enable non-blocking writeCmd in stock ArduinoBLE by setting BLEWriteWithoutResponse flag (0x04)
+        }
+
+        // Determine type of scale
+        if(peripheral.characteristic(READ_CHAR_OLD_VERSION).canSubscribe()){
+            Serial.println("Old version Acaia Detected");
+            _type   = OLD;
+            _write  = peripheral.characteristic(WRITE_CHAR_OLD_VERSION);
+            _read   = peripheral.characteristic(READ_CHAR_OLD_VERSION);
+        }else if(peripheral.characteristic(READ_CHAR_NEW_VERSION).canSubscribe()){
+            Serial.println("New version Acaia Detected");
+            _type   = NEW;
+            _write  = peripheral.characteristic(WRITE_CHAR_NEW_VERSION);
+            _read   = peripheral.characteristic(READ_CHAR_NEW_VERSION);
+        } else if(peripheral.characteristic(READ_CHAR_GENERIC).canSubscribe()){
+            Serial.println("Generic Scale Detected");
+            _type   = GENERIC;
+            _write  = peripheral.characteristic(WRITE_CHAR_GENERIC);
+            _read   = peripheral.characteristic(READ_CHAR_GENERIC);
+        } else if(peripheral.characteristic(READ_CHAR_FELICITA).canSubscribe()){
+            Serial.println("Felicita Arc Detected");
+            _type   = FELICITA;
+            _write  = peripheral.characteristic(WRITE_CHAR_FELICITA);
+            _read   = peripheral.characteristic(READ_CHAR_FELICITA);
+        }
+        else{
+            return fail(peripheral, "unable to determine scale type");
+        }
+
+        if(!_write){
+            return fail(peripheral, "write characteristic not found");
+        }
+
+        if(_debug){
+            Serial.print("write characteristic properties 0x");
+            Serial.println(_write.properties(), HEX);
+        }
+
+        // Fire-and-forget commands (heartbeat, timer) use write-without-response.
+        // Stock ArduinoBLE refuses that unless the characteristic advertises
+        // BLEWriteWithoutResponse (0x04), so set the flag only when it is missing.
+        if(!(_write.properties() & BLEWriteWithoutResponse)){
             CharAccess* ca = (CharAccess*)(void*)&_write;
             if (ca && ca->remote) {
-                ca->remote->properties |= 0x04;
-            }
-
-            if(!_read.canSubscribe()){
-                Serial.println("unable to subscribe to READ");
-                return false;
-            }else if(!_read.subscribe()){
-                Serial.println("subscription failed");
-                return false;
-            }else {
-                Serial.println("subscribed!");
-            }
-        
-            if(_type == OLD || _type == NEW){
-                if(_write.writeValue(IDENTIFY, sizeof(IDENTIFY))){
-                    Serial.println("identify write successful");
-                }else{
-                    Serial.println("identify write failed");
-                    return false; 
-                }
-                if(_write.writeValue(NOTIFICATION_REQUEST, sizeof(NOTIFICATION_REQUEST))){
-                    Serial.println("notification request write successful");
-                }else{
-                    Serial.println("notification request write failed");
-                return false; 
-                                }
-            }else if(_type == FELICITA){
-                // Wake the Felicita into a deterministic, known-good mode
-                // (weight + timer) instead of whatever IDENTIFY used to leave it in.
-                if(_write.writeValue(WEIGHT_TIMER_MODE_FELICITA, sizeof(WEIGHT_TIMER_MODE_FELICITA))){
-                    Serial.println("felicita weight+timer mode set");
-                }else{
-                    Serial.println("felicita mode set failed");
-                    return false;
+                ca->remote->properties |= BLEWriteWithoutResponse;
+                if(_debug){
+                    Serial.println("forced write-without-response on write characteristic");
                 }
             }
-            _connected = true;
-            _packetPeriod = 0;
-            return true;
         }
+
+        // Reset per-connection state before notifications can start arriving.
+        _rxLen = 0;
+        _newWeight = false;
+        _tareState = TARE_IDLE;
+        _tareRetries = 0;
+        _packetPeriod = 0;
+        _lastPacket = 0;
+
+        // Every notification is delivered to onNotify() from inside the BLE
+        // stack, so none are lost when several arrive between two polls.
+        _read.setEventHandler(BLEUpdated, onNotify);
+
+        if(!_read.canSubscribe()){
+            return fail(peripheral, "unable to subscribe to READ");
+        }else if(!_read.subscribe()){
+            return fail(peripheral, "subscription failed");
+        }else {
+            Serial.println("subscribed!");
+        }
+
+        if(_type == OLD || _type == NEW){
+            if(!writeCommand(IDENTIFY, sizeof(IDENTIFY), true, "identify")){
+                return fail(peripheral, "identify write failed");
+            }
+            if(!writeCommand(NOTIFICATION_REQUEST, sizeof(NOTIFICATION_REQUEST), true, "notification request")){
+                return fail(peripheral, "notification request write failed");
+            }
+        }else if(_type == FELICITA){
+            // Wake the Felicita into a deterministic, known-good mode
+            // (weight + timer) instead of whatever IDENTIFY used to leave it in.
+            if(!writeCommand(WEIGHT_TIMER_MODE_FELICITA, sizeof(WEIGHT_TIMER_MODE_FELICITA), true, "felicita mode")){
+                return fail(peripheral, "felicita mode set failed");
+            }
+        }
+
+        _peripheral = peripheral;
+        _connected = true;
+        _lastHeartBeat = 0;          // send the first heartbeat right away
+        // Start the packet timeout now, so a scale that never streams weight
+        // is detected instead of looking "connected" forever.
+        _lastPacket = millis();
+        Serial.println("scale ready");
+        return true;
     }while(millis() - start < 100);
 
-    Serial.println("failed to find scale");
-    BLE.stopScan(); // Clean up and stop the BLE hardware scan before exiting!
-    return false;    
+    // Scale not seen yet. Leave the scan running for the next call.
+    return false;
 }
 
-// All command writes now use sizeof() so the byte count always matches the
-// array. Felicita commands are single ASCII bytes; sending the right length
-// (1) is essential -- the old code wrote 20/7 bytes from these 1-byte arrays,
-// leaking adjacent memory to the scale as extra commands.
-bool AcaiaArduinoBLE::tare(){
+void AcaiaArduinoBLE::disconnect(){
+    bool wasConnected = _connected;
+    _connected = false;
+    _newWeight = false;
+    _rxLen = 0;
+    _tareState = TARE_IDLE;
+    if(_peripheral){
+        _peripheral.disconnect();
+    }
+    _peripheral = BLEDevice();
+    if(wasConnected){
+        Serial.println("scale disconnected");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+void AcaiaArduinoBLE::waitForCommandGap(){
+    // Keep servicing the BLE stack (and therefore incoming weight) while waiting.
+    while(millis() - _lastCommand < COMMAND_GAP_MS){
+        BLE.poll();
+    }
+}
+
+bool AcaiaArduinoBLE::writeCommand(const uint8_t* data, int length, bool withResponse, const char* name){
+    waitForCommandGap();
+    bool ok = _write.writeValue(data, length, withResponse);
+    _lastCommand = millis();
+    if(ok){
+        if(_debug){
+            Serial.print(name);
+            Serial.println(" write successful");
+        }
+        return true;
+    }
+    Serial.print(name);
+    Serial.println(" write failed");
+    // A failed write means the link is gone or broken. Tear it down fully so
+    // the scale starts advertising again and the next init() can find it.
+    if(_connected){
+        disconnect();
+    }
+    return false;
+}
+
+// Tare is the one command whose loss is dangerous (the shot would be measured
+// with the cup on the scale), so it is written with response and verified by
+// watching for a ~0 g reading (see updateTare()).
+bool AcaiaArduinoBLE::sendTare(){
     bool ok;
     switch(_type){
-        case GENERIC:  ok = _write.writeValue(TARE_GENERIC,  sizeof(TARE_GENERIC),  false); break;
-        case FELICITA: ok = _write.writeValue(TARE_FELICITA, sizeof(TARE_FELICITA), false); break;
-        default:       ok = _write.writeValue(TARE_ACAIA,    sizeof(TARE_ACAIA),    false); break;
+        case GENERIC:  ok = writeCommand(TARE_GENERIC,  sizeof(TARE_GENERIC),  true, "tare"); break;
+        case FELICITA: ok = writeCommand(TARE_FELICITA, sizeof(TARE_FELICITA), true, "tare"); break;
+        default:       ok = writeCommand(TARE_ACAIA,    sizeof(TARE_ACAIA),    true, "tare"); break;
     }
     if(ok){
-          Serial.println("tare write successful");
-          return true;
-    }else{
-        _connected = false;
-        Serial.println("tare write failed");
-        return false;
+        _tareState = TARE_PENDING;
+        _tareSent = millis();
     }
+    return ok;
+}
+
+bool AcaiaArduinoBLE::tare(){
+    _tareRetries = 0;
+    return sendTare();
+}
+
+void AcaiaArduinoBLE::updateTare(){
+    if(_tareState != TARE_PENDING || millis() - _tareSent < TARE_VERIFY_MS){
+        return;
+    }
+    if(_tareRetries < TARE_MAX_RETRIES){
+        _tareRetries++;
+        Serial.print("tare not confirmed, retrying (");
+        Serial.print(_tareRetries);
+        Serial.println(")");
+        sendTare();
+    }else{
+        Serial.println("tare failed");
+        _tareState = TARE_FAILED;
+    }
+}
+
+tare_state AcaiaArduinoBLE::tareState(){
+    return _tareState;
 }
 
 bool AcaiaArduinoBLE::startTimer(){
-    bool ok;
     switch(_type){
-        case GENERIC:  ok = _write.writeValue(START_TIMER_GENERIC,  sizeof(START_TIMER_GENERIC),  false); break;
-        case FELICITA: ok = _write.writeValue(START_TIMER_FELICITA, sizeof(START_TIMER_FELICITA), false); break;
-        default:       ok = _write.writeValue(START_TIMER,          sizeof(START_TIMER),          false); break;
-    }
-    if(ok){
-	    Serial.println("start timer write successful");
-        return true;
-    }else{
-        _connected = false;
-        Serial.println("start timer write failed");
-        return false;
+        case GENERIC:  return writeCommand(START_TIMER_GENERIC,  sizeof(START_TIMER_GENERIC),  false, "start timer");
+        case FELICITA: return writeCommand(START_TIMER_FELICITA, sizeof(START_TIMER_FELICITA), false, "start timer");
+        default:       return writeCommand(START_TIMER,          sizeof(START_TIMER),          false, "start timer");
     }
 }
 
 bool AcaiaArduinoBLE::stopTimer(){
-    bool ok;
     switch(_type){
-        case GENERIC:  ok = _write.writeValue(STOP_TIMER_GENERIC,  sizeof(STOP_TIMER_GENERIC),  false); break;
-        case FELICITA: ok = _write.writeValue(STOP_TIMER_FELICITA, sizeof(STOP_TIMER_FELICITA), false); break;
-        default:       ok = _write.writeValue(STOP_TIMER,          sizeof(STOP_TIMER),          false); break;
-    }
-    if(ok){
-        Serial.println("stop timer write successful");
-        return true;
-    }else{
-        _connected = false;
-        Serial.println("stop timer write failed");
-        return false;
+        case GENERIC:  return writeCommand(STOP_TIMER_GENERIC,  sizeof(STOP_TIMER_GENERIC),  false, "stop timer");
+        case FELICITA: return writeCommand(STOP_TIMER_FELICITA, sizeof(STOP_TIMER_FELICITA), false, "stop timer");
+        default:       return writeCommand(STOP_TIMER,          sizeof(STOP_TIMER),          false, "stop timer");
     }
 }
 
 bool AcaiaArduinoBLE::resetTimer(){
-    bool ok;
     switch(_type){
-        case GENERIC:  ok = _write.writeValue(RESET_TIMER_GENERIC,  sizeof(RESET_TIMER_GENERIC),  false); break;
-        case FELICITA: ok = _write.writeValue(RESET_TIMER_FELICITA, sizeof(RESET_TIMER_FELICITA), false); break;
-        default:       ok = _write.writeValue(RESET_TIMER,          sizeof(RESET_TIMER),          false); break;
-    }
-    if(ok){
-        Serial.println("reset timer write successful");
-        return true;
-    }else{
-        _connected = false;
-        Serial.println("reset timer write failed");
-        return false;
+        case GENERIC:  return writeCommand(RESET_TIMER_GENERIC,  sizeof(RESET_TIMER_GENERIC),  false, "reset timer");
+        case FELICITA: return writeCommand(RESET_TIMER_FELICITA, sizeof(RESET_TIMER_FELICITA), false, "reset timer");
+        default:       return writeCommand(RESET_TIMER,          sizeof(RESET_TIMER),          false, "reset timer");
     }
 }
 
+// Single command on BooKoo scales; emulated on everything else.
 bool AcaiaArduinoBLE::tareStartTimer(){
-    if(_write.writeValue(TARE_START_TIMER_BOOKOO, 6, false)){
-          Serial.println("tare and start timer write successful");
-          return true;
-    }else{
-        _connected = false;
-        Serial.println("tare and start timer write failed");
+    if(_type != GENERIC){
+        bool ok = tare();
+        ok = resetTimer() && ok;
+        ok = startTimer() && ok;
+        return ok;
+    }
+    _tareRetries = 0;
+    if(!writeCommand(TARE_START_TIMER_BOOKOO, sizeof(TARE_START_TIMER_BOOKOO), true, "tare and start timer")){
         return false;
     }
+    _tareState = TARE_PENDING;
+    _tareSent = millis();
+    return true;
 }
 
 bool AcaiaArduinoBLE::beep(){
-
-    // for acaia's, use the tare command to generate the beep
-    if(_write.writeValue((_type == GENERIC ? BEEP_LEVEL_1_BOOKOO : TARE_ACAIA), 6, false)){
-          Serial.println("beep write successful");
-          return true;
-    }else{
-        _connected = false;
-        Serial.println("beep level write failed");
-        return false;
+    switch(_type){
+        case GENERIC:  return writeCommand(BEEP_LEVEL_1_BOOKOO, sizeof(BEEP_LEVEL_1_BOOKOO), false, "beep");
+        case FELICITA: return false; // no beep command known; don't send Acaia bytes to a Felicita
+        // for acaia's, use the tare command to generate the beep
+        default:       return writeCommand(TARE_ACAIA, sizeof(TARE_ACAIA), false, "beep");
     }
 }
 
 bool AcaiaArduinoBLE::heartbeat(){
-    if(_write.writeValue(HEARTBEAT, 7, false)){
+    if(writeCommand(HEARTBEAT, sizeof(HEARTBEAT), false, "heartbeat")){
         _lastHeartBeat = millis();
         return true;
-    }else{
-        _connected = false;
-        return false;
     }
+    return false;
 }
+
 float AcaiaArduinoBLE::getWeight(){
     return _currentWeight;
 }
 
 bool AcaiaArduinoBLE::heartbeatRequired(){
-    if(_type == OLD || _type == NEW){
-        return (millis() - _lastHeartBeat) > HEARTBEAT_PERIOD_MS;
-    }else{
-        return 0;
-    }
+    return _connected
+        && (_type == OLD || _type == NEW)
+        && (millis() - _lastHeartBeat) > HEARTBEAT_PERIOD_MS;
 }
+
 bool AcaiaArduinoBLE::isConnected(){
     return _connected;
 }
+
+unsigned long AcaiaArduinoBLE::packetPeriod(){
+    return _packetPeriod;
+}
+
+unsigned long AcaiaArduinoBLE::msSinceLastPacket(){
+    return _lastPacket ? millis() - _lastPacket : 0;
+}
+
+unsigned long AcaiaArduinoBLE::checksumErrors(){
+    return _checksumErrors;
+}
+
+// ---------------------------------------------------------------------------
+// Incoming data
+// ---------------------------------------------------------------------------
+
 bool AcaiaArduinoBLE::newWeightAvailable(){
-    bool newWeightPacket = false;
-
-    //check how long its been since we last got a response
-    if(_lastPacket && millis()-_lastPacket > MAX_PACKET_PERIOD_MS){
-        Serial.println("timeout!");
-        //reset connection
-        _connected = false;
-        BLE.disconnect();
+    if(!_connected){
         return false;
-    }else if(_read.valueUpdated()){
-        byte input[] = {0,0,0,0,0,0,0,0,0,0,0,0,0};
-        int l = _read.valueLength();
-
-        // Get packet
-        if(10 >= l ||                       //10 byte packets for pre-2021 lunar
-          (13 >= l && OLD != _type) ||      //13 byte packets for pyxis and older lunar 2021 fw
-          (14 == l && OLD == _type) ||      //14 byte packets for lunar 2021 AL008
-          (17 == l && NEW == _type) ||      //17 byte packets for newer lunar 2021 fw
-          (20 == l && GENERIC == _type) ||  //20 byte packets for generic scales
-          (18 == l && FELICITA == _type)    //18 byte packets for Felicita Arc
-        ){
-            _read.readValue(input, (l > 13) ? 13 : l); // readValue() seems to crash whenever l > weight packet (10, 13 or 18)
-
-            if(_debug){
-                Serial.print(l);
-                Serial.print(": 0x");
-
-                printData(input, l);
-                Serial.println();
-            }
-        }
-
-        // Parse New style data packet
-        if (NEW == _type && (13 == l || 17 == l) && input[4] == 0x05)
-        {
-            //Grab weight bytes (5 and 6) 
-            // apply scaling based on the unit byte (9)
-            // get sign byte (10)
-            _currentWeight = (((input[6] & 0xff) << 8) + (input[5] & 0xff)) 
-                            / pow(10,input[9])
-                            * ((input[10] & 0x02) ? -1 : 1);
-            newWeightPacket = true;
-
-        // Parse old style data packet
-        }else if( OLD == _type && (l == 10 || l == 14)){
-            //Grab weight bytes (2 and 3),
-            // apply scaling based on the unit byte (6)
-            // get sign byte (7)
-            _currentWeight = (((input[3] & 0xff) << 8) + (input[2] & 0xff)) 
-                            / pow(10, input[6]) 
-                            * ((input[7] & 0x02) ? -1 : 1);
-            newWeightPacket = true;
-
-        }else if( GENERIC == _type && l == 20){
-            //Grab weight bytes (3-8),
-            // get sign byte (2)
-            _currentWeight = (( input[7] << 16) | (input[8] << 8) | input[9]);
-	        
-	          if (input[6] == 45) { // Check if the value is negative
-            _currentWeight = -_currentWeight;
-                }
-            _currentWeight = _currentWeight / 100;
-            newWeightPacket = true;
-
-        }else if( FELICITA == _type && l == 18){
-            // Felicita Arc 18-byte ASCII packet (matches pyfelicita lib):
-            //   byte 2     = sign ('-'/0x2D = negative)
-            //   bytes 3..8 = six ASCII weight digits, value / 100 = grams
-            _currentWeight = (input[2] == 0x2D ? -1 : 1)
-                * ( (input[3] - 0x30) * 1000
-                  + (input[4] - 0x30) * 100
-                  + (input[5] - 0x30) * 10
-                  + (input[6] - 0x30) * 1
-                  + (input[7] - 0x30) * 0.1
-                  + (input[8] - 0x30) * 0.01 );
-            newWeightPacket = true;
-        }
-        if(newWeightPacket){
-            if(_lastPacket){
-                _packetPeriod = millis() - _lastPacket;
-            }
-            _lastPacket = millis();
-        }
-        return newWeightPacket;
     }
-    else{
+
+    // Service the BLE stack; notifications are parsed in onNotify().
+    BLE.poll();
+
+    if(!_peripheral.connected()){
+        Serial.println("link lost");
+        disconnect();
         return false;
+    }
+
+    // check how long its been since we last got a weight packet
+    if(millis() - _lastPacket > MAX_PACKET_PERIOD_MS){
+        Serial.println("timeout!");
+        disconnect();
+        return false;
+    }
+
+    updateTare();
+
+    if(_newWeight){
+        _newWeight = false;
+        return true;
+    }
+    return false;
+}
+
+void AcaiaArduinoBLE::onNotify(BLEDevice device, BLECharacteristic characteristic){
+    if(_instance){
+        _instance->handleNotification(characteristic.value(), characteristic.valueLength());
     }
 }
+
+void AcaiaArduinoBLE::setWeight(float weight){
+    unsigned long now = millis();
+    _currentWeight = weight;
+    _newWeight = true;
+    if(_lastPacket){
+        _packetPeriod = now - _lastPacket;
+    }
+    _lastPacket = now;
+
+    if(_tareState == TARE_PENDING && fabs(weight) < TARE_TOLERANCE_G){
+        _tareState = TARE_CONFIRMED;
+        if(_debug){
+            Serial.println("tare confirmed");
+        }
+    }
+}
+
+void AcaiaArduinoBLE::handleNotification(const uint8_t* data, int length){
+    if(!data || length <= 0){
+        return;
+    }
+
+    if(_debug){
+        Serial.print(length);
+        Serial.print(": 0x");
+        printData(data, length);
+        Serial.println();
+    }
+
+    switch(_type){
+        case OLD:
+        case NEW: {
+            // Acaia data is a byte stream: a message may be split across
+            // notifications (older Lunars send "ef dd 0c" on its own) or
+            // several messages may share one notification.
+            //
+            // Some firmware sends the body of a weight message without its
+            // header. If no partial message is pending and the notification
+            // starts like a weight event body, supply the header.
+            if(_rxLen == 0 && length >= 2 && data[0] == 0x08 && data[1] == ACAIA_EVENT_WEIGHT){
+                _rx[0] = ACAIA_HEADER1;
+                _rx[1] = ACAIA_HEADER2;
+                _rx[2] = ACAIA_CMD_EVENT;
+                _rxLen = 3;
+            }
+            if(_rxLen + length > ACAIA_RX_BUFFER_SIZE){
+                // Should never happen with valid data; resynchronise.
+                _rxLen = 0;
+                if(length > ACAIA_RX_BUFFER_SIZE){
+                    data += length - ACAIA_RX_BUFFER_SIZE;
+                    length = ACAIA_RX_BUFFER_SIZE;
+                }
+            }
+            memcpy(&_rx[_rxLen], data, length);
+            _rxLen += length;
+            parseAcaiaStream();
+            break;
+        }
+
+        case GENERIC:
+            if(length == 20){
+                // weight bytes 7-9 (big endian, 0.01 g), sign byte 6 ('-' = negative)
+                float w = (((uint32_t)data[7] << 16) | ((uint32_t)data[8] << 8) | data[9]) / 100.0;
+                if(data[6] == 45){
+                    w = -w;
+                }
+                setWeight(w);
+            }
+            break;
+
+        case FELICITA:
+            if(length == 18){
+                // Felicita Arc 18-byte ASCII packet (matches pyfelicita lib):
+                //   byte 2     = sign ('-'/0x2D = negative)
+                //   bytes 3..8 = six ASCII weight digits, value / 100 = grams
+                long v = 0;
+                for(int i = 3; i <= 8; i++){
+                    if(data[i] < '0' || data[i] > '9'){
+                        return; // not a weight packet
+                    }
+                    v = v * 10 + (data[i] - '0');
+                }
+                setWeight((data[2] == 0x2D ? -1 : 1) * v / 100.0);
+            }
+            break;
+    }
+}
+
+void AcaiaArduinoBLE::parseAcaiaStream(){
+    while(true){
+        // find header
+        int start = -1;
+        for(int i = 0; i + 1 < _rxLen; i++){
+            if(_rx[i] == ACAIA_HEADER1 && _rx[i+1] == ACAIA_HEADER2){
+                start = i;
+                break;
+            }
+        }
+        if(start < 0){
+            // Keep a trailing 0xef: it may be the first half of a header.
+            if(_rxLen > 0 && _rx[_rxLen-1] == ACAIA_HEADER1){
+                _rx[0] = ACAIA_HEADER1;
+                _rxLen = 1;
+            }else{
+                _rxLen = 0;
+            }
+            return;
+        }
+        if(start > 0){
+            memmove(_rx, &_rx[start], _rxLen - start);
+            _rxLen -= start;
+        }
+
+        if(_rxLen < 4){
+            return; // need cmd and len bytes
+        }
+
+        int total = _rx[3] + 5;
+        if(total < 6 || total > ACAIA_RX_BUFFER_SIZE){
+            // impossible length: not a real header, skip it
+            memmove(_rx, &_rx[2], _rxLen - 2);
+            _rxLen -= 2;
+            continue;
+        }
+        if(_rxLen < total){
+            return; // wait for the rest of the message
+        }
+
+        if(handleAcaiaMessage(_rx, total)){
+            memmove(_rx, &_rx[total], _rxLen - total);
+            _rxLen -= total;
+        }else{
+            // Bad message: drop only the header and resynchronise on the
+            // next one, so a valid message following it is not lost.
+            memmove(_rx, &_rx[2], _rxLen - 2);
+            _rxLen -= 2;
+        }
+    }
+}
+
+// Returns false if the message is corrupt (bad checksum).
+bool AcaiaArduinoBLE::handleAcaiaMessage(const uint8_t* msg, int length){
+#if ACAIA_VERIFY_CHECKSUM
+    uint8_t ck1 = 0, ck2 = 0;
+    for(int i = 3; i < length - 2; i++){
+        if((i - 3) % 2 == 0){
+            ck1 += msg[i];
+        }else{
+            ck2 += msg[i];
+        }
+    }
+    if(ck1 != msg[length-2] || ck2 != msg[length-1]){
+        _checksumErrors++;
+        if(_debug){
+            Serial.print("checksum error: ");
+            printData(msg, length);
+            Serial.println();
+        }
+        return false;
+    }
+#endif
+
+    if(msg[2] != ACAIA_CMD_EVENT || length < 13 || msg[4] != ACAIA_EVENT_WEIGHT){
+        return true; // valid, but not a weight event
+    }
+
+    // weight event payload starts at byte 5:
+    //   [0..1] weight (little endian), [4] decimal places, [5] bit 1 = negative
+    const uint8_t* p = &msg[5];
+    uint8_t unit = p[4];
+    if(unit < 1 || unit > 4){
+        if(_debug){
+            Serial.print("unexpected weight unit byte ");
+            Serial.println(unit);
+        }
+        return true;
+    }
+    static const float SCALE[5] = {1, 10, 100, 1000, 10000};
+    float w = (((uint16_t)p[1] << 8) | p[0]) / SCALE[unit];
+    if(p[5] & 0x02){
+        w = -w;
+    }
+    setWeight(w);
+    return true;
+}
+
 bool AcaiaArduinoBLE::isScaleName(String name){
     String nameShort = name.substring(0,5);
 

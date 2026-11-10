@@ -10,13 +10,18 @@ void setup() {
 
   // initialize the Bluetooth® Low Energy hardware
   BLE.begin();
-  // Optionally add your Mac Address as an argument: acaia.init("##:##:##:##:##:##");
-  scale.init();
-  scale.tare();
-  scale.tare();
 }
 
 void loop() {
+  // (Re)connect. init() returns quickly; the scan keeps running between calls.
+  // Optionally add your Mac Address as an argument: scale.init("##:##:##:##:##:##");
+  if (!scale.isConnected()) {
+    if (scale.init()) {
+      scale.tare(); // verified by the library; see scale.tareState()
+    }
+    return;
+  }
+
   // Send a heartbeat message to the acaia periodically to maintain connection
   if (scale.heartbeatRequired()) {
     scale.heartbeat();
