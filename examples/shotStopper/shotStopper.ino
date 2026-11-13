@@ -53,6 +53,12 @@
                               // (as defined by MOMENTARY)
 #define CAN_TARE_START_TIMER false // If set, reset timer, start timer and tare are done in one command (supported by Bookoo scales only)
 #define TIMER_ONLY false      // disables brew by weight functionality, and only automates the timer/tare
+#define PADDLE_INTERLOCK false // Linea Mini-style stop for the "ShotStopper Micra Interlock" board
+                              //  (hardware/shotstopper-micra-interlock). The paddle stays on;
+                              //  at the target weight STOP opens a normally-closed switch in
+                              //  series with the paddle, which stops the shot. It closes again
+                              //  once the paddle has been turned off. Requires MOMENTARY false.
+#define PADDLE_RELEASE_MS 300 // Paddle must read "off" this long before the interlock closes
 //***************
 
 // Board Hardware 
@@ -75,7 +81,11 @@
   #define IN          10
   #define OUT         11
   #define REED_IN     9
+  #define STOP        5       // Micra Interlock board: HIGH opens the paddle line
 #endif 
+#ifndef STOP
+  #define STOP        5
+#endif
 
 #define BUTTON_STATE_ARRAY_LENGTH 31
 #define MAX_DATAPOINTS 1000
@@ -108,6 +118,10 @@ bool buttonPressed = false; //physical status of button
 bool buttonLatched = false; //electrical status of button
 unsigned long lastButtonRead_ms = 0;
 int newButtonState = 0;
+
+// paddle interlock (PADDLE_INTERLOCK)
+bool interlockOpen = false;          // STOP is HIGH: the machine sees the paddle as off
+unsigned long paddleOffSince_ms = 0; // when the paddle was last seen turning off (0 = on)
 
 struct Shot {
   float start_timestamp_s; // Relative to runtime
@@ -155,8 +169,24 @@ void setup() {
   }
   
   // initialize the GPIO hardware
+  if(PADDLE_INTERLOCK){
+    digitalWrite(STOP, LOW); // interlock closed: the paddle works normally
+    pinMode(STOP, OUTPUT);
+  }
   pinMode(in, INPUT_PULLUP);
   pinMode(OUT, OUTPUT);
+  if(PADDLE_INTERLOCK){
+    // If the paddle is already on at boot (power-up, or a reset in the middle
+    // of a held stop), keep the interlock open until it is turned off, so
+    // the machine never starts a shot that nobody started.
+    delay(20);
+    if(!digitalRead(in)){
+      digitalWrite(STOP, HIGH);
+      interlockOpen = true;
+      buttonPressed = true;
+      Serial.println("paddle on at boot: interlock open until paddle off");
+    }
+  }
   pinMode(LED_RED, OUTPUT);
   pinMode(LED_GREEN, OUTPUT);
   pinMode(LED_BLUE, OUTPUT);
@@ -174,6 +204,14 @@ void setup() {
 }
 
 void loop() {
+  readButton();
+  paddleInterlock_task();
+
+  // Without a scale the paddle works by hand. Track it so that reconnecting
+  // in the middle of a shot does not start (and tare) a new one.
+  if(PADDLE_INTERLOCK && !scale.isConnected()){
+    buttonPressed = newButtonState;
+  }
 
   // Attempt to connect to scale every 1 seconds
   if(!scale.isConnected() & millis() - lastConnectAttempt >= 1000){
@@ -237,7 +275,17 @@ void setBrewingState(bool brewing){
 
     shot.end_s = seconds_f() - shot.start_timestamp_s;
     scale.stopTimer();
-    if(!TIMER_ONLY 
+    if(PADDLE_INTERLOCK){
+      // Open the interlock only for an automatic stop. After a scale
+      // disconnect the paddle keeps working by hand.
+      if(!TIMER_ONLY && (ENDTYPE::WEIGHT == shot.end || ENDTYPE::TIME == shot.end)){
+        digitalWrite(STOP, HIGH);
+        interlockOpen = true;
+        paddleOffSince_ms = 0;
+        Serial.println("interlock open, waiting for paddle off");
+      }
+    }
+    else if(!TIMER_ONLY 
     && MOMENTARY 
     && (ENDTYPE::WEIGHT == shot.end || ENDTYPE::TIME == shot.end)){
       //Pulse button to stop brewing
@@ -295,6 +343,81 @@ void setColor(int rgb[3]){
   currentColor[0] = rgb[0];
   currentColor[1] = rgb[1];
   currentColor[2] = rgb[2];
+}
+
+// Sample the brew switch every BUTTON_READ_PERIOD_MS. Runs whether or not
+// the scale is connected, so the paddle interlock can always be released.
+void readButton(){
+  // Read button every period
+  if(millis() > (lastButtonRead_ms + BUTTON_READ_PERIOD_MS) ){
+    lastButtonRead_ms = millis();
+
+    //push back for new entry
+    for(int i = BUTTON_STATE_ARRAY_LENGTH - 2;i>=0;i--){
+      buttonArr[i+1] = buttonArr[i];
+    }
+    buttonArr[0] = !digitalRead(in); //Active Low
+
+    //only return 1 if contains 1
+    // Also assume the button is off for a few milliseconds
+    // after the shot is done, there can be residual noise
+    // from the reed switch
+    newButtonState = 0;
+    for(int i=0; i<BUTTON_STATE_ARRAY_LENGTH; i++){
+      if(buttonArr[i]){
+        newButtonState = 1;          
+      }
+      //Serial.print(buttonArr[i]);
+    }
+    //Serial.println();
+
+    //The reed switch measurements require a small amount of delay for accuracy.
+    //  if the shot just stopped, assume that the reed switch should read "open" for the first 0.5s
+    if(REEDSWITCH && !shot.brewing && seconds_f() < (shot.start_timestamp_s + shot.end_s + 1)){
+      //Serial.println("force reedSwitch Off");
+      newButtonState = 0;
+    }
+  }
+}
+
+// Close the interlock again once the paddle has been off for PADDLE_RELEASE_MS.
+void paddleInterlock_task(){
+  if(!PADDLE_INTERLOCK || !interlockOpen){
+    return;
+  }
+  if(newButtonState){
+    paddleOffSince_ms = 0;
+  }
+  else if(paddleOffSince_ms == 0){
+    paddleOffSince_ms = millis() | 1;
+  }
+  else if(millis() - paddleOffSince_ms >= PADDLE_RELEASE_MS){
+    interlockOpen = false;
+    digitalWrite(STOP, LOW);
+    Serial.println("paddle off, interlock closed");
+  }
+}
+
+// Paddle events in PADDLE_INTERLOCK mode: the paddle position is the brew state
+// unless the interlock is holding the shot stopped.
+void paddleInterlock_events(){
+  if(newButtonState && !buttonPressed){
+    Serial.println("Paddle on");
+    buttonPressed = true;
+    if(!interlockOpen){
+      shot.brewing = true;
+      setBrewingState(shot.brewing);
+    }
+  }
+  else if(!newButtonState && buttonPressed){
+    Serial.println("Paddle off");
+    buttonPressed = false;
+    if(shot.brewing){
+      shot.brewing = false;
+      shot.end = ENDTYPE::BUTTON;
+      setBrewingState(shot.brewing);
+    }
+  }
 }
 
 void scaleConnected_task(){
@@ -361,41 +484,14 @@ void scaleConnected_task(){
     Serial.println();
   }
 
-  // Read button every period
-  if(millis() > (lastButtonRead_ms + BUTTON_READ_PERIOD_MS) ){
-    lastButtonRead_ms = millis();
-
-    //push back for new entry
-    for(int i = BUTTON_STATE_ARRAY_LENGTH - 2;i>=0;i--){
-      buttonArr[i+1] = buttonArr[i];
-    }
-    buttonArr[0] = !digitalRead(in); //Active Low
-
-    //only return 1 if contains 1
-    // Also assume the button is off for a few milliseconds
-    // after the shot is done, there can be residual noise
-    // from the reed switch
-    newButtonState = 0;
-    for(int i=0; i<BUTTON_STATE_ARRAY_LENGTH; i++){
-      if(buttonArr[i]){
-        newButtonState = 1;          
-      }
-      //Serial.print(buttonArr[i]);
-    }
-    //Serial.println();
-
-    //The reed switch measurements require a small amount of delay for accuracy.
-    //  if the shot just stopped, assume that the reed switch should read "open" for the first 0.5s
-    if(REEDSWITCH && !shot.brewing && seconds_f() < (shot.start_timestamp_s + shot.end_s + 1)){
-      //Serial.println("force reedSwitch Off");
-      newButtonState = 0;
-    }
-  }
-
   // SHOT INITIATION EVENTS --------------------------------
   
+  if(PADDLE_INTERLOCK){
+    paddleInterlock_events();
+  }
+
   //button just pressed (and released)
-  if(newButtonState && buttonPressed == false ){
+  else if(newButtonState && buttonPressed == false ){
     Serial.println("ButtonPressed");
     buttonPressed = true;
     if(!MOMENTARY || REEDSWITCH){
@@ -437,7 +533,7 @@ void scaleConnected_task(){
   }
     
   //Max duration reached
-  else if(!TIMER_ONLY 
+  if(!TIMER_ONLY 
   && shot.brewing 
   && shot.shotTimer > MAX_SHOT_DURATION_S ){
     shot.brewing = false;
