@@ -13,7 +13,7 @@
 #ifndef AcaiaArduinoBLE_h
 #define AcaiaArduinoBLE_h
 
-#define LIBRARY_VERSION        "3.4.0"
+#define LIBRARY_VERSION        "3.5.0"
 #define WRITE_CHAR_OLD_VERSION "2a80"
 #define READ_CHAR_OLD_VERSION  "2a80"
 #define WRITE_CHAR_NEW_VERSION "49535343-8841-43f4-a8d4-ecbe34729bb3"
@@ -42,6 +42,17 @@
 #endif
 #ifndef TARE_MAX_RETRIES
 #define TARE_MAX_RETRIES        2
+#endif
+
+// Timer verification: after startTimer(), the scale's timer must be seen
+// running (from its timer reports) within TIMER_VERIFY_MS, otherwise reset +
+// start are re-sent (up to TIMER_MAX_RETRIES times). Scales that never report
+// their timer are left unverified.
+#ifndef TIMER_VERIFY_MS
+#define TIMER_VERIFY_MS         2000
+#endif
+#ifndef TIMER_MAX_RETRIES
+#define TIMER_MAX_RETRIES       1
 #endif
 
 // While disconnected the scan keeps running between init() calls; it is
@@ -74,6 +85,14 @@ enum tare_state{
     TARE_FAILED     // no ~0 g reading after all retries
 };
 
+enum timer_state{
+    TIMER_IDLE,       // no start outstanding (or stopped)
+    TIMER_PENDING,    // start sent, waiting to see the timer running
+    TIMER_CONFIRMED,  // scale reported its timer running after the last start
+    TIMER_FAILED,     // not seen running after all retries
+    TIMER_UNVERIFIED  // the scale doesn't report its timer; can't be checked
+};
+
 class AcaiaArduinoBLE{
     public:
         AcaiaArduinoBLE(bool debug);
@@ -95,6 +114,14 @@ class AcaiaArduinoBLE{
         unsigned long packetPeriod();      // ms between the last two weight packets
         unsigned long msSinceLastPacket(); // ms since the last weight packet
         unsigned long checksumErrors();    // Acaia messages dropped for a bad checksum
+
+        timer_state timerState();
+        float scaleTimer();                // seconds on the scale's timer, NAN if never reported
+        unsigned long msSinceTimerReport();// ms since the last timer report, 0 if never
+        int batteryPercent();              // 0-100, -1 if the scale hasn't reported it
+        bool unitsOunces();                // true if the scale reported it is set to ounces
+        bool hasScaleFlowRate();           // the scale itself reports flow (BooKoo)
+        float scaleFlowRate();             // g/s reported by the scale, NAN if not available
     private:
         bool isScaleName(String);
         bool fail(BLEDevice& peripheral, const char* msg);
@@ -102,6 +129,10 @@ class AcaiaArduinoBLE{
         void waitForCommandGap();
         bool sendTare();
         void updateTare();
+        bool sendStartTimer();
+        bool sendResetTimer();
+        void updateTimer();
+        void setTimer(float seconds);
 
         // notification handling
         static void onNotify(BLEDevice device, BLECharacteristic characteristic);
@@ -140,6 +171,16 @@ class AcaiaArduinoBLE{
         tare_state          _tareState;
         unsigned long       _tareSent;
         int                 _tareRetries;
+
+        timer_state         _timerState;
+        unsigned long       _timerStartSent;
+        int                 _timerRetries;
+        float               _scaleTimer;
+        float               _timerAtStart;   // first timer report after the start command
+        unsigned long       _lastTimerReport;
+        int                 _battery;
+        bool                _ounces;
+        float               _scaleFlow;
 };
 
 #endif

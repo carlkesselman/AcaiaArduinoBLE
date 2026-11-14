@@ -36,19 +36,22 @@ optocoupler circuit. D9 and D11 are no longer connected.
                                                                      (R4 min load)
  Nano D5  ── R1 ── K1 LED            HIGH = K1 open = machine sees paddle off
           └─ R2 10k to GND           keeps K1 closed during boot / reset
- Nano D10 ── U2 transistor to GND    LOW = paddle on  (R7 10k pull-up)
+ Nano D10 ── U2 transistor to GND    LOW = paddle on  (R7 47k pull-up)
 ```
 
 - **K1** (CPC1117N) is a normally-closed solid-state switch in series with the
   paddle line. Driving D5 high opens it, so the control board sees the paddle
   as off and stops the shot. With no drive, it is closed.
 - **U2** senses the paddle independently of K1. A small isolated 5 V supply
-  (PS1) pushes about 1.4 mA through U2's LED and D1 into the paddle wire. When
+  (PS1) pushes about 1.7 mA through U2's LED and D1 into the paddle wire. When
   the paddle shorts that wire to COMMON, U2 conducts and pulls D10 low. This
   works with K1 open or closed, so the firmware always knows where the paddle is.
 - **D1** stops the control board's own pull-up from feeding back into the sense
-  circuit. **R6** soaks up the small leakage when the control board's pull-up
-  is about 3.3 V, so a floating line doesn't read as "paddle on".
+  circuit. **R6** (680 Ω, smaller than R3) soaks up the leakage when the
+  control board's pull-up is about 3.3 V, so a floating line doesn't read as
+  "paddle on".
+- **R4** (240 Ω, 1206) draws 21 mA so that PS1 has its 10 % minimum load. With
+  less, its output is unspecified and can rise well above 5 V.
 - The logic side (Nano) and the machine side (ribbon) share no copper. They
   connect only through K1, U2 and PS1. The minimum copper gap between the two
   sides is 0.7 mm. That is **functional isolation for a low-voltage paddle
@@ -63,7 +66,8 @@ keep a shot going after the paddle is turned off.
 
 V2.1 carried the paddle signal on ribbon pin **8** or pin **12**, depending on
 the machine (its SB1–SB5 jumpers). Find out which pin yours uses, either from
-your V2.1 board (which of SB1/SB2 is bridged) or with a meter. Then bridge
+your V2.1 board (which of SB1/SB2 is bridged) or with a meter. The ShotStopper
+V3.1 schematic puts the Micra on pin 12 and the Linea Mini on pin 8. Then bridge
 these with a blob of solder:
 
 | Paddle on | JP1 (paddle side) | JP2 (brain side) | Also bridge |
@@ -87,15 +91,35 @@ What the firmware does in this mode:
 
 | Event | Result |
 |-------|--------|
-| Paddle on | Shot starts: tare, reset and start the timer |
+| Paddle on | Machine brews; the shot is tracked: tare, reset and start the timer |
 | Predicted target weight, or `MAX_SHOT_DURATION_S` | D5 high: K1 opens and the shot stops |
 | Paddle still on after the stop | K1 stays open; no new shot |
-| Paddle off for 300 ms (`PADDLE_RELEASE_MS`) | D5 low: K1 closes, ready for the next shot |
-| Paddle off before the target | Shot ends normally; K1 never opens |
-| Scale disconnects mid-shot | K1 stays closed; the paddle works by hand |
-| Board boots with the paddle on | K1 opens until the paddle is turned off |
+| Paddle off (50 ms debounce, `PADDLE_DEBOUNCE_MS`) | D5 low: K1 closes, so the next paddle-on always brews |
+| Paddle off before the target | Shot stops; K1 never opens |
+| Scale lost during a weighed shot | D5 high: the shot stops (`STOP_ON_SCALE_LOSS`; set it `false` to leave the shot to the paddle) |
+| Scale not connected when the paddle goes on | K1 stays closed; the paddle works by hand |
+| Paddle on for `INTERLOCK_MAX_BREW_S` (90 s), with or without a scale | D5 high: the brew stops until the paddle is off |
+| Reconnect, or reset, partway through a shot | The shot keeps running on the paddle and isn't re-tared |
+| Crash or watchdog reset during a held stop | The stop stays held until the paddle is off, so a finished shot isn't restarted |
+| `loop()` stalls for 20 s (`WATCHDOG_S`) | The watchdog resets the board, and K1 closes |
+
+### Fail-safe guarantees
+
+- **Paddle off always stops brewing.** This is enforced by hardware: K1 is in
+  series, so an open paddle opens the line whatever the ESP32 does.
+- **Board unpowered, unplugged, or held in reset.** K1 is normally closed, and R2
+  keeps it closed while D5 is undriven, so the Micra behaves as stock.
+- **Paddle on starts brewing** whenever the firmware is running, or the board is
+  off or resetting. The only time it doesn't is an automatic stop being held,
+  and that hold ends as soon as the paddle reads off. A hung ESP32 is reset by
+  the watchdog within `WATCHDOG_S`.
+- **No remote start.** The ESP32 can only interrupt the paddle line. It cannot
+  make the machine brew.
 
 These cases are covered by host tests with stub libraries, not on hardware.
+
+Flow rate, the scale sanity checks and over-the-air updates are described
+in [`examples/shotStopper/README.md`](../../examples/shotStopper/README.md).
 
 ## Ordering from PCBWay
 
@@ -131,6 +155,7 @@ part to place.
 5. **First power-up on the bench.** With only USB connected, check that D5 high
    makes K1 open: measure the resistance between J3 and J4 on the selected pin.
    Then check that shorting the selected J3 pin to pin 6 pulls D10 low.
+   Measure across C2 as well: expect 5.0–5.5 V from PS1.
 
 Work inside the Micra only with it unplugged. Mains is present in the chassis.
 

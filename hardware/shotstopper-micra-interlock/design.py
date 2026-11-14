@@ -53,6 +53,7 @@ PWR_PIN1 = g(107.798, 59.665)
 # ref: (value, kicad footprint, MPN, manufacturer, description, (x, y, rot))
 LIB = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
 R0603 = "Resistor_SMD:R_0603_1608Metric"
+R1206 = "Resistor_SMD:R_1206_3216Metric"
 C0805 = "Capacitor_SMD:C_0805_2012Metric"
 JUMPER = "Jumper:SolderJumper-2_P1.3mm_Open_RoundedPad1.0x1.5mm"
 JUMPER3 = "Jumper:SolderJumper-3_P1.3mm_Open_RoundedPad1.0x1.5mm"
@@ -76,13 +77,17 @@ PARTS = {
             "Isolated DC-DC 3.3V->5V 1W SIP-4", (42.4, 38.2, 180)),
     "D1": ("1N4148WS", "Diode_SMD:D_SOD-323", "1N4148WS-7-F", "Diodes Inc", "Signal diode", (31.4, 32.45, 180)),
     "R1": ("390", R0603, "RC0603FR-07390RL", "Yageo", "K1 LED current", (19.25, 27.4, 90)),
-    "R2": ("10k", R0603, "RC0603FR-0710KL", "Yageo", "Pull-up/down", (13.3, 21.986, 0)),
-    "R3": ("2.2k", R0603, "RC0603FR-072K2L", "Yageo", "Paddle sense current", (33.6, 34.2, 0)),
-    "R4": ("1k", R0603, "RC0603FR-071KL", "Yageo", "DC-DC minimum load", (36.1, 31.2, 90)),
-    "R6": ("4.7k", R0603, "RC0603FR-074K7L", "Yageo", "U2 LED leakage shunt", (30.6, 34.2, 0)),
-    "R7": ("10k", R0603, "RC0603FR-0710KL", "Yageo", "Pull-up/down", (13.3, 11.3, 0)),
+    "R2": ("10k", R0603, "RC0603FR-0710KL", "Yageo", "K1 pull-down (closed in reset)", (13.3, 21.986, 0)),
+    # R3/R6: about 1.7 mA through U2's LED with the paddle on. R6 < R3 keeps the LED
+    # off when PS1 leaks into a 3.3 V paddle line with the paddle off.
+    "R3": ("1k", R0603, "RC0603FR-071KL", "Yageo", "Paddle sense current", (33.6, 34.2, 0)),
+    # R4: 21 mA, PS1's 10 % minimum load (unloaded, its output is unspecified
+    # and can rise well above 5 V). About 105 mW, hence 1206.
+    "R4": ("240", R1206, "RC1206FR-07240RL", "Yageo", "DC-DC minimum load (0.25 W)", (36.0, 31.15, 90)),
+    "R6": ("680", R0603, "RC0603FR-07680RL", "Yageo", "U2 LED leakage shunt", (30.6, 34.2, 0)),
+    "R7": ("47k", R0603, "RC0603FR-0747KL", "Yageo", "Paddle sense pull-up", (13.3, 11.3, 0)),
     "C1": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC decoupling", (35.6, 38.0, 90)),
-    "C2": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC decoupling", (36.1, 27.7, 90)),
+    "C2": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC decoupling", (36.1, 27.15, 90)),
     "JP1": ("PADDLE 8|12", JUMPER3, "", "", "Solder jumper: paddle ribbon pin select", (29.0, 15.113, 270)),
     "JP2": ("BRAIN 8|12", JUMPER3, "", "", "Solder jumper: brain ribbon pin select", (35.3, 15.113, 270)),
     "JP3": ("8 THRU", JUMPER, "", "", "Solder jumper: pin 8 straight through", (32.15, 13.95, 0)),

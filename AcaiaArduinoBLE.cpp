@@ -37,7 +37,10 @@ byte WEIGHT_TIMER_MODE_FELICITA[1]  = { 0x32 }; // 'Weight+timer mode (known-goo
 #define ACAIA_HEADER1      0xef
 #define ACAIA_HEADER2      0xdd
 #define ACAIA_CMD_EVENT    0x0c
+#define ACAIA_CMD_SETTINGS 0x08
 #define ACAIA_EVENT_WEIGHT 0x05
+#define ACAIA_EVENT_TIMER  0x07
+#define ACAIA_EVENT_ACK    0x0b   // carries a weight or timer value (see pyacaia)
 
 // Helper struct layout to enable BLEWriteWithoutResponse (0x04) in stock ArduinoBLE.
 // Matches ArduinoBLE 2.x (BLECharacteristic / BLERemoteAttribute / BLERemoteCharacteristic).
@@ -78,6 +81,15 @@ AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug){
     _tareState = TARE_IDLE;
     _tareSent = 0;
     _tareRetries = 0;
+    _timerState = TIMER_IDLE;
+    _timerStartSent = 0;
+    _timerRetries = 0;
+    _scaleTimer = NAN;
+    _timerAtStart = NAN;
+    _lastTimerReport = 0;
+    _battery = -1;
+    _ounces = false;
+    _scaleFlow = NAN;
     _instance = this;
 }
 
@@ -229,6 +241,13 @@ bool AcaiaArduinoBLE::init(String mac){
         _tareRetries = 0;
         _packetPeriod = 0;
         _lastPacket = 0;
+        _timerState = TIMER_IDLE;
+        _timerRetries = 0;
+        _scaleTimer = NAN;
+        _lastTimerReport = 0;
+        _battery = -1;
+        _ounces = false;
+        _scaleFlow = NAN;
 
         // Every notification is delivered to onNotify() from inside the BLE
         // stack, so none are lost when several arrive between two polls.
@@ -277,6 +296,7 @@ void AcaiaArduinoBLE::disconnect(){
     _newWeight = false;
     _rxLen = 0;
     _tareState = TARE_IDLE;
+    _timerState = TIMER_IDLE;
     if(_peripheral){
         _peripheral.disconnect();
     }
@@ -360,15 +380,36 @@ tare_state AcaiaArduinoBLE::tareState(){
     return _tareState;
 }
 
-bool AcaiaArduinoBLE::startTimer(){
+bool AcaiaArduinoBLE::sendStartTimer(){
+    bool ok;
     switch(_type){
-        case GENERIC:  return writeCommand(START_TIMER_GENERIC,  sizeof(START_TIMER_GENERIC),  false, "start timer");
-        case FELICITA: return writeCommand(START_TIMER_FELICITA, sizeof(START_TIMER_FELICITA), false, "start timer");
-        default:       return writeCommand(START_TIMER,          sizeof(START_TIMER),          false, "start timer");
+        case GENERIC:  ok = writeCommand(START_TIMER_GENERIC,  sizeof(START_TIMER_GENERIC),  false, "start timer"); break;
+        case FELICITA: ok = writeCommand(START_TIMER_FELICITA, sizeof(START_TIMER_FELICITA), false, "start timer"); break;
+        default:       ok = writeCommand(START_TIMER,          sizeof(START_TIMER),          false, "start timer"); break;
+    }
+    if(ok){
+        _timerState = TIMER_PENDING;
+        _timerStartSent = millis();
+        _timerAtStart = NAN;
+    }
+    return ok;
+}
+
+bool AcaiaArduinoBLE::sendResetTimer(){
+    switch(_type){
+        case GENERIC:  return writeCommand(RESET_TIMER_GENERIC,  sizeof(RESET_TIMER_GENERIC),  false, "reset timer");
+        case FELICITA: return writeCommand(RESET_TIMER_FELICITA, sizeof(RESET_TIMER_FELICITA), false, "reset timer");
+        default:       return writeCommand(RESET_TIMER,          sizeof(RESET_TIMER),          false, "reset timer");
     }
 }
 
+bool AcaiaArduinoBLE::startTimer(){
+    _timerRetries = 0;
+    return sendStartTimer();
+}
+
 bool AcaiaArduinoBLE::stopTimer(){
+    _timerState = TIMER_IDLE;
     switch(_type){
         case GENERIC:  return writeCommand(STOP_TIMER_GENERIC,  sizeof(STOP_TIMER_GENERIC),  false, "stop timer");
         case FELICITA: return writeCommand(STOP_TIMER_FELICITA, sizeof(STOP_TIMER_FELICITA), false, "stop timer");
@@ -377,11 +418,82 @@ bool AcaiaArduinoBLE::stopTimer(){
 }
 
 bool AcaiaArduinoBLE::resetTimer(){
-    switch(_type){
-        case GENERIC:  return writeCommand(RESET_TIMER_GENERIC,  sizeof(RESET_TIMER_GENERIC),  false, "reset timer");
-        case FELICITA: return writeCommand(RESET_TIMER_FELICITA, sizeof(RESET_TIMER_FELICITA), false, "reset timer");
-        default:       return writeCommand(RESET_TIMER,          sizeof(RESET_TIMER),          false, "reset timer");
+    return sendResetTimer();
+}
+
+// The timer only matters for what the scale shows (brew-by-weight uses the
+// caller's own clock), but a lost start is visible and easy to fix: watch the
+// scale's timer reports and re-send reset + start if the timer isn't running.
+void AcaiaArduinoBLE::updateTimer(){
+    if(_timerState != TIMER_PENDING || millis() - _timerStartSent < TIMER_VERIFY_MS){
+        return;
     }
+    if(_lastTimerReport == 0){
+        // This scale (or firmware) never reports its timer: nothing to check.
+        _timerState = TIMER_UNVERIFIED;
+        return;
+    }
+    if(_timerRetries < TIMER_MAX_RETRIES){
+        _timerRetries++;
+        Serial.println("scale timer not running, re-sending reset + start");
+        sendResetTimer();
+        sendStartTimer();
+    }else{
+        Serial.println("scale timer failed to start");
+        _timerState = TIMER_FAILED;
+    }
+}
+
+// Timer report from the scale. Confirmed once it has advanced since the first
+// report after the start command, and is no larger than the time since that
+// command (so a stale or un-reset timer doesn't count).
+void AcaiaArduinoBLE::setTimer(float seconds){
+    unsigned long now = millis();
+    _scaleTimer = seconds;
+    _lastTimerReport = now;
+    if(_timerState != TIMER_PENDING){
+        return;
+    }
+    float sinceStart = (now - _timerStartSent) / 1000.0;
+    if(seconds > sinceStart + 1.0){
+        return; // not reset: still counting from an earlier shot
+    }
+    if(isnan(_timerAtStart)){
+        _timerAtStart = seconds;
+    }else if(seconds > _timerAtStart){
+        _timerState = TIMER_CONFIRMED;
+        if(_debug){
+            Serial.println("timer confirmed");
+        }
+    }
+}
+
+timer_state AcaiaArduinoBLE::timerState(){
+    return _timerState;
+}
+
+float AcaiaArduinoBLE::scaleTimer(){
+    return _scaleTimer;
+}
+
+unsigned long AcaiaArduinoBLE::msSinceTimerReport(){
+    return _lastTimerReport ? millis() - _lastTimerReport : 0;
+}
+
+int AcaiaArduinoBLE::batteryPercent(){
+    return _battery;
+}
+
+bool AcaiaArduinoBLE::unitsOunces(){
+    return _ounces;
+}
+
+bool AcaiaArduinoBLE::hasScaleFlowRate(){
+    return !isnan(_scaleFlow);
+}
+
+float AcaiaArduinoBLE::scaleFlowRate(){
+    return _scaleFlow;
 }
 
 // Single command on BooKoo scales; emulated on everything else.
@@ -398,6 +510,10 @@ bool AcaiaArduinoBLE::tareStartTimer(){
     }
     _tareState = TARE_PENDING;
     _tareSent = millis();
+    _timerRetries = TIMER_MAX_RETRIES; // a retry would re-tare too; verify only
+    _timerState = TIMER_PENDING;
+    _timerStartSent = _tareSent;
+    _timerAtStart = NAN;
     return true;
 }
 
@@ -470,6 +586,7 @@ bool AcaiaArduinoBLE::newWeightAvailable(){
     }
 
     updateTare();
+    updateTimer();
 
     if(_newWeight){
         _newWeight = false;
@@ -550,6 +667,14 @@ void AcaiaArduinoBLE::handleNotification(const uint8_t* data, int length){
                 if(data[6] == 45){
                     w = -w;
                 }
+                // BooKoo layout: [2..4] timer ms, [10] flow sign, [11..12] flow
+                // (0.01 g/s), [13] battery %
+                float flow = (((uint16_t)data[11] << 8) | data[12]) / 100.0;
+                _scaleFlow = (data[10] == 45) ? -flow : flow;
+                if(data[13] <= 100){
+                    _battery = data[13];
+                }
+                setTimer((((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 8) | data[4]) / 1000.0);
                 setWeight(w);
             }
             break;
@@ -646,27 +771,53 @@ bool AcaiaArduinoBLE::handleAcaiaMessage(const uint8_t* msg, int length){
     }
 #endif
 
-    if(msg[2] != ACAIA_CMD_EVENT || length < 13 || msg[4] != ACAIA_EVENT_WEIGHT){
-        return true; // valid, but not a weight event
-    }
-
-    // weight event payload starts at byte 5:
-    //   [0..1] weight (little endian), [4] decimal places, [5] bit 1 = negative
-    const uint8_t* p = &msg[5];
-    uint8_t unit = p[4];
-    if(unit < 1 || unit > 4){
-        if(_debug){
-            Serial.print("unexpected weight unit byte ");
-            Serial.println(unit);
+    // Settings (sent by the scale on its own): [4] battery % (bit 7 = flag),
+    // [5] units (2 = grams, 5 = ounces). Layout from pyacaia.
+    if(msg[2] == ACAIA_CMD_SETTINGS){
+        if(length >= 8){
+            int battery = msg[4] & 0x7f;
+            if(battery <= 100){
+                _battery = battery;
+            }
+            _ounces = (msg[5] == 5);
         }
         return true;
     }
-    static const float SCALE[5] = {1, 10, 100, 1000, 10000};
-    float w = (((uint16_t)p[1] << 8) | p[0]) / SCALE[unit];
-    if(p[5] & 0x02){
-        w = -w;
+
+    if(msg[2] != ACAIA_CMD_EVENT || length < 6){
+        return true; // valid, but nothing we use
     }
-    setWeight(w);
+
+    uint8_t event = msg[4];
+    const uint8_t* p = &msg[5];
+    int payloadLen = length - 7;          // between the event type and the checksum
+    if(event == ACAIA_EVENT_ACK && payloadLen >= 3){
+        // [2] says what follows: 5 = weight, 7 = timer
+        event = p[2];
+        p += 3;
+        payloadLen -= 3;
+    }
+
+    if(event == ACAIA_EVENT_WEIGHT && payloadLen >= 6){
+        // [0..1] weight (little endian), [4] decimal places, [5] bit 1 = negative
+        uint8_t unit = p[4];
+        if(unit < 1 || unit > 4){
+            if(_debug){
+                Serial.print("unexpected weight unit byte ");
+                Serial.println(unit);
+            }
+            return true;
+        }
+        static const float SCALE[5] = {1, 10, 100, 1000, 10000};
+        float w = (((uint16_t)p[1] << 8) | p[0]) / SCALE[unit];
+        if(p[5] & 0x02){
+            w = -w;
+        }
+        setWeight(w);
+    }else if(event == ACAIA_EVENT_TIMER && payloadLen >= 3){
+        // [0] minutes, [1] seconds, [2] tenths
+        setTimer(p[0] * 60 + p[1] + p[2] / 10.0);
+    }
     return true;
 }
 
