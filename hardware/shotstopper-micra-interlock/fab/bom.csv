@@ -1,17 +1,16 @@
 Item,Designator,Qty,Manufacturer,Mfg Part #,Description / Value,Package/Footprint,Type,Notes
-1,J1,1,Sullins,PPTC151LFBN-RC,Nano ESP32 L - Female header 1x15 2.54mm (Nano left),PinSocket_1x15_P2.54mm_Vertical,Thru-hole,Female socket for Arduino Nano ESP32 (Nano not supplied)
-2,J2,1,Sullins,PPTC151LFBN-RC,Nano ESP32 R - Female header 1x15 2.54mm (Nano right),PinSocket_1x15_P2.54mm_Vertical,Thru-hole,
-3,J3,1,Sullins,PEC08DAAN,Buttons - Male header 2x8 2.54mm (paddle ribbon),Ribbon_2x08,Thru-hole,Mount on TOP side
-4,J4,1,Sullins,PEC08DAAN,Brain - Male header 2x8 2.54mm (control board ribbon),Ribbon_2x08,Thru-hole,
-5,J5,1,Sullins,PEC02SAAN,"PWR - Male header 1x2 2.54mm (+ = VIN, - = GND)",PinHeader_1x02_P2.54mm_Vertical,Thru-hole,
-6,K1,1,Littelfuse,CPC1117NTR,CPC1117N - OptoMOS relay 1-Form-B (normally closed) 60V 120mA,SOP-4_3.8x4.1mm_P2.54mm,SMD,Normally-CLOSED type; do not substitute a normally-open relay
-7,U2,1,Everlight,EL357N(C)(TA)-G,"EL357N - Optocoupler, paddle sense",SO-4_4.4x3.6mm_P2.54mm,SMD,
-8,PS1,1,Mornsun,B0305S-1WR3,B0305S-1WR3 - Isolated DC-DC 3.3V->5V 1W SIP-4,Converter_DCDC_Murata_MEE1SxxxxSC_THT,Thru-hole,Through-hole SIP-4; Murata MEE1S0305SC is a pin-compatible alternative
-9,D1,1,Diodes Inc,1N4148WS-7-F,1N4148WS - Signal diode,D_SOD-323,SMD,
-10,R1,1,Yageo,RC0603FR-07390RL,390 - K1 LED current,R_0603_1608Metric,SMD,
-11,R2,1,Yageo,RC0603FR-0710KL,10k - K1 pull-down (closed in reset),R_0603_1608Metric,SMD,
-12,R3,1,Yageo,RC0603FR-071KL,1k - Paddle sense current,R_0603_1608Metric,SMD,
-13,R4,1,Yageo,RC1206FR-07240RL,240 - DC-DC minimum load (0.25 W),R_1206_3216Metric,SMD,
-14,R6,1,Yageo,RC0603FR-07680RL,680 - U2 LED leakage shunt,R_0603_1608Metric,SMD,
-15,R7,1,Yageo,RC0603FR-0747KL,47k - Paddle sense pull-up,R_0603_1608Metric,SMD,
-16,"C1,C2",2,Samsung,CL21A475KAQNNNE,4.7u - DC-DC decoupling,C_0805_2012Metric,SMD,
+1,J1,1,Arduino,ABX00092,Nano ESP32 - Arduino Nano ESP32 with headers (left pin row; right row in J2),PinSocket_1x15_P2.54mm_Vertical,Thru-hole,"One module, two pin rows: J1 = left row (pin 1 = D13), J2 = right row (pin 1 = D12). USB-C toward the board edge marked USB. Solder the Nano's headers directly into J1 and J2, seated flat; NO sockets"
+2,J3,1,Sullins,PEC08DAAN,Buttons - Male header 2x8 2.54mm (paddle ribbon),Ribbon_2x08,Thru-hole,Mount on TOP side
+3,J4,1,Sullins,PEC08DAAN,Brain - Male header 2x8 2.54mm (control board ribbon),Ribbon_2x08,Thru-hole,
+4,J5,1,Sullins,PEC02SAAN,"PWR - Male header 1x2 2.54mm (+ = VIN, - = GND)",PinHeader_1x02_P2.54mm_Vertical,Thru-hole,
+5,K1,1,Littelfuse,CPC1117NTR,CPC1117N - OptoMOS relay 1-Form-B (normally closed) 60V 120mA,SOP-4_3.8x4.1mm_P2.54mm,SMD,Normally-CLOSED type; do not substitute a normally-open relay
+6,U2,1,Everlight,EL357N(C)(TA)-G,"EL357N - Optocoupler, paddle sense",SO-4_4.4x3.6mm_P2.54mm,SMD,
+7,PS1,1,Mornsun,B0305S-1WR3,B0305S-1WR3 - Isolated DC-DC 3.3V->5V 1W SIP-4,Converter_DCDC_Murata_MEE1SxxxxSC_THT,Thru-hole,Through-hole SIP-4; Murata MEE1S0305SC is a pin-compatible alternative
+8,D1,1,Diodes Inc,1N4148WS-7-F,1N4148WS - Signal diode,D_SOD-323,SMD,
+9,R1,1,Yageo,RC0603FR-07390RL,390 - K1 LED current,R_0603_1608Metric,SMD,
+10,R2,1,Yageo,RC0603FR-0710KL,10k - K1 pull-down (closed in reset),R_0603_1608Metric,SMD,
+11,R3,1,Yageo,RC0603FR-071KL,1k - Paddle sense current,R_0603_1608Metric,SMD,
+12,R4,1,Yageo,RC1206FR-07240RL,240 - DC-DC minimum load (0.25 W),R_1206_3216Metric,SMD,
+13,R6,1,Yageo,RC0603FR-07680RL,680 - U2 LED leakage shunt,R_0603_1608Metric,SMD,
+14,R7,1,Yageo,RC0603FR-0747KL,47k - Paddle sense pull-up,R_0603_1608Metric,SMD,
+15,"C1,C2",2,Samsung,CL21A475KAQNNNE,4.7u - DC-DC decoupling,C_0805_2012Metric,SMD,

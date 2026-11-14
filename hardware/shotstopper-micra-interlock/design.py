@@ -24,7 +24,9 @@ def g(x, y):
 MOUNTING_HOLES = [g(84.607, 58.301), g(84.607, 89.535), g(107.315, 67.945), g(107.315, 86.741)]
 MOUNT_KEEPOUT_R = 3.0              # copper keep-out radius around the M3 holes
 
-# --- Arduino Nano ESP32 socket (two 1x15 female headers, 15.24 mm apart) -------
+# --- Arduino Nano ESP32, soldered directly (no sockets) for a lower profile ---------
+# Its two 1x15 pin rows (15.24 mm apart) go into the J1 and J2 hole rows. J1 carries
+# the module on the BOM; J2 is the same module's second row and is not a separate part.
 NANO_LEFT = ["D13", "3V3", "B0", "A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7", "VBUS", "B1", "GND", "VIN"]
 NANO_RIGHT = ["D12", "D11", "D10", "D9", "D8", "D7", "D6", "D5", "D4", "D3", "D2", "GND", "RST", "RX0", "TX1"]
 NANO_L_PIN1 = g(77.003, 92.187)
@@ -59,10 +61,11 @@ JUMPER = "Jumper:SolderJumper-2_P1.3mm_Open_RoundedPad1.0x1.5mm"
 JUMPER3 = "Jumper:SolderJumper-3_P1.3mm_Open_RoundedPad1.0x1.5mm"
 
 PARTS = {
-    "J1": ("Nano ESP32 L", "Connector_PinSocket_2.54mm:PinSocket_1x15_P2.54mm_Vertical",
-           "PPTC151LFBN-RC", "Sullins", "Female header 1x15 2.54mm (Nano left)", NANO_L_PIN1 + (0,)),
-    "J2": ("Nano ESP32 R", "Connector_PinSocket_2.54mm:PinSocket_1x15_P2.54mm_Vertical",
-           "PPTC151LFBN-RC", "Sullins", "Female header 1x15 2.54mm (Nano right)", NANO_R_PIN1 + (0,)),
+    "J1": ("Nano ESP32", "Connector_PinSocket_2.54mm:PinSocket_1x15_P2.54mm_Vertical",
+           "ABX00092", "Arduino", "Arduino Nano ESP32 with headers (left pin row; right row in J2)",
+           NANO_L_PIN1 + (0,)),
+    "J2": ("Nano ESP32 R row", "Connector_PinSocket_2.54mm:PinSocket_1x15_P2.54mm_Vertical",
+           "", "", "Right pin row of the Nano ESP32 placed at J1", NANO_R_PIN1 + (0,)),
     "J3": ("Buttons", "custom:Ribbon_2x08", "PEC08DAAN", "Sullins",
            "Male header 2x8 2.54mm (paddle ribbon)", None),
     "J4": ("Brain", "custom:Ribbon_2x08", "PEC08DAAN", "Sullins",
@@ -94,6 +97,7 @@ PARTS = {
     "JP4": ("12 THRU", JUMPER, "", "", "Solder jumper: pin 12 straight through", (32.15, 16.5, 0)),
 }
 NOT_ASSEMBLED = {"JP1", "JP2", "JP3", "JP4"}   # bare copper, no part
+NANO_SECOND_ROW = "J2"                       # holes for the Nano at J1; no part of its own
 
 # --- Nets ---------------------------------------------------------------------------
 NETS = {

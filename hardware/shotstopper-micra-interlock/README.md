@@ -17,10 +17,17 @@ not run on hardware. Work through [Before you order](#before-you-order) first.
 
 ## Same as V2.1
 
-The outline, the four M3 mounting holes, the Arduino Nano ESP32 socket, the
+The outline, the four M3 mounting holes, the Arduino Nano ESP32 position, the
 two 2x8 ribbon headers (J3 "Buttons", J4 "Brain") and the 2-pin power header
 are all where they are on V2.1, so the board fits the V2.1 half case and the
-same place in the machine.
+same place in the machine. The ribbon headers have the same pin 1 position
+and every pin except the paddle pin passes straight through, so the existing
+ShotStopper ribbon cables plug in the same way.
+
+Changed from V2.1: the Nano is soldered directly into the board by its own
+headers instead of sitting in sockets. That puts its top about 8 mm lower,
+roughly 5–6 mm above the board instead of about 13 mm. It is still flashed
+over its own USB-C port, at the board edge marked USB, or over WiFi.
 
 Removed from V2.1: the spade terminals, the reed-switch header, and the Q1
 optocoupler circuit. D9 and D11 are no longer connected.
@@ -136,9 +143,12 @@ solder-mask colour, lead-free HASL or ENIG. Minimum track and gap are
 0.25 mm and 0.2 mm, and the smallest drill is 0.3 mm (vias), all inside
 PCBWay's standard capability.
 
-Assembly: top side only, SMD and through-hole. The Arduino Nano ESP32 is not
-on the BOM; it plugs into the J1/J2 sockets. JP1–JP4 are bare pads with no
-part to place.
+Assembly: top side only, SMD and through-hole. The Arduino Nano ESP32 *with
+headers* (Arduino ABX00092) is on the BOM as J1: PCBWay solders its two pin
+rows straight into the J1 and J2 holes, with no sockets, USB-C toward the
+edge marked USB. J2 is the Nano's second row, not a separate part, so it is
+not on the BOM or in the centroid file. JP1–JP4 are bare pads with no part
+to place.
 
 ## Before you order
 

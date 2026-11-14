@@ -2,8 +2,7 @@ Ref,Val,Package,PosX,PosY,Rot,Side
 "C1","4.7u","C_0805_2012Metric",35.600000,-38.000000,90.000000,top
 "C2","4.7u","C_0805_2012Metric",36.100000,-27.150000,90.000000,top
 "D1","1N4148WS","D_SOD-323",31.400000,-32.450000,180.000000,top
-"J1","Nano ESP32 L","PinSocket_1x15_P2.54mm_Vertical",1.438000,-4.206000,0.000000,top
-"J2","Nano ESP32 R","PinSocket_1x15_P2.54mm_Vertical",16.678000,-4.206000,0.000000,top
+"J1","Nano ESP32","PinSocket_1x15_P2.54mm_Vertical",1.438000,-4.206000,0.000000,top
 "J3","Buttons","Ribbon_2x08_P2.54mm_V2.1",26.035000,-4.953000,0.000000,top
 "J4","Brain","Ribbon_2x08_P2.54mm_V2.1",40.640000,-4.953000,0.000000,top
 "J5","PWR","PinHeader_1x02_P2.54mm_Vertical",32.232999,-36.728000,0.000000,top

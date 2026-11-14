@@ -4,9 +4,11 @@ from collections import OrderedDict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import design as D
 
-THT = {"J1", "J2", "J3", "J4", "J5", "PS1"}
+THT = {"J1", "J3", "J4", "J5", "PS1"}
 NOTES = {
-    "J1": "Female socket for Arduino Nano ESP32 (Nano not supplied)",
+    "J1": ("One module, two pin rows: J1 = left row (pin 1 = D13), J2 = right row (pin 1 = D12). "
+           "USB-C toward the board edge marked USB. Solder the Nano's headers directly into "
+           "J1 and J2, seated flat; NO sockets"),
     "J3": "Mount on TOP side",
     "PS1": "Through-hole SIP-4; Murata MEE1S0305SC is a pin-compatible alternative",
     "K1": "Normally-CLOSED type; do not substitute a normally-open relay",
@@ -14,7 +16,7 @@ NOTES = {
 
 groups = OrderedDict()
 for ref, (value, fp, mpn, mfr, desc, _) in D.PARTS.items():
-    if ref in D.NOT_ASSEMBLED:
+    if ref in D.NOT_ASSEMBLED or ref == D.NANO_SECOND_ROW:
         continue
     key = (mpn, value, fp)
     groups.setdefault(key, {"refs": [], "mfr": mfr, "desc": desc, "fp": fp})["refs"].append(ref)

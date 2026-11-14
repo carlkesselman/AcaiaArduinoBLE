@@ -40,6 +40,12 @@ for fp in board.GetFootprints():
             f.SetVisible(False)
 
 
+# J2 is the Nano's second pin row, not a part: keep it off the BOM and centroid
+for fp in board.GetFootprints():
+    if fp.GetReference() == D.NANO_SECOND_ROW:
+        fp.SetAttributes(fp.GetAttributes() | pcbnew.FP_EXCLUDE_FROM_BOM | pcbnew.FP_EXCLUDE_FROM_POS_FILES)
+
+
 def text(s, x, y, size=0.9, layer=pcbnew.F_SilkS, angle=0, just=0):
     t = pcbnew.PCB_TEXT(board)
     t.SetText(s); t.SetPosition(V(x, y)); t.SetLayer(layer)
