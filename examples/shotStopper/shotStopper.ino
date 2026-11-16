@@ -25,6 +25,7 @@
 #include <EEPROM.h>
 #include <esp_task_wdt.h>
 #include <esp_system.h>
+#include <esp_timer.h>
 #include <esp_attr.h>
 #include <math.h>
 
@@ -67,7 +68,15 @@
                               //  series with the paddle, which stops the shot. It closes again
                               //  once the paddle has been turned off. Requires MOMENTARY false.
 #endif
-#define PADDLE_DEBOUNCE_MS 50 // Paddle must read "off" this long to count as off (interlock mode)
+#define PADDLE_DEBOUNCE_MS 300 // Interlock mode: the paddle must read "off" this long to count as off.
+                              //  Long on purpose: a false "off" while a stop is held would restart the shot.
+#define PADDLE_ON_SAMPLES 4   // ...and "on" for this many 5 ms samples to count as on
+#define PADDLE_TRACK_LATE_MS 5000 // a paddle-on first noticed this late (the loop was busy connecting)
+                              //  is not tared and weighed: the shot is left to the paddle. Within
+                              //  it, little or nothing has reached the cup yet, so taring is still right.
+#define PADDLE_RETRACK_MS 1000 // nor is a paddle-on this soon after a paddle-off
+#define SWAP_RELEASE_MS 1000  // Swapped J3/J4 plugs: the paddle reads off within this long of an automatic
+#define SWAP_REON_MS 500      //  stop, and on again within this long of the release. Then: manual mode.
 #define INTERLOCK_MAX_BREW_S 90 // Interlock mode: stop any brew once the paddle has been on this
                               //  long, with or without a scale. Above MAX_SHOT_DURATION_S, which
                               //  only covers shots that are being weighed. 0 disables it.
@@ -134,6 +143,8 @@
 #define MAX_STEP_G 5.0        // larger change between two readings is a bump, not espresso
 #define MAX_FLOW_GPS 12.0     // faster "flow" than this is a bump
 #define MAX_DROP_G 1.0        // weight falling by more than this: cup lifted or knocked
+#define READINGS_LOST_S 5     // no believable reading for this long in a weighed shot (cup lifted,
+                              //  scale knocked): treated like a lost scale
 #define LOW_BATTERY_PCT 15
 
 #define BUTTON_STATE_ARRAY_LENGTH 31
@@ -169,13 +180,37 @@ unsigned long lastButtonRead_ms = 0;
 int newButtonState = 0;
 
 // paddle interlock (PADDLE_INTERLOCK)
-bool interlockOpen = false;          // STOP is HIGH: the machine sees the paddle as off
+// The paddle is sampled, and a held stop released, from a 5 ms timer (paddleTick),
+// not from loop(): the release must not wait for a Bluetooth call that is
+// blocking loop(). These are shared with that timer.
+volatile bool interlockOpen = false; // STOP is HIGH: the machine sees the paddle as off
+volatile bool paddleState = false;   // debounced paddle position
+volatile uint8_t paddleOnCount = 0;
+volatile unsigned long paddleLastRawOn_ms = 0;
+volatile unsigned long paddleOnAt_ms = 0;      // when paddleState last turned on
+volatile unsigned long interlockOpened_ms = 0;
+volatile unsigned long interlockReleased_ms = 0;
+volatile bool interlockReleased = false;       // set by the timer, reported and cleared by loop()
+bool paddleTimerOk = false;
+bool interlockFault = false;         // plugs look swapped: never open the interlock (manual mode)
+bool swapSuspect = false;
 bool paddleWasOn = false;            // paddle state at the previous loop, for INTERLOCK_MAX_BREW_S
 unsigned long paddleOnSince_ms = 0;
-// Survives a crash or watchdog reset (not a power cycle), so a held stop stays
-// held instead of letting the machine restart a finished shot.
+unsigned long lastPaddleOffEvent_ms = 0;
+bool paddleOffEventSeen = false;
+unsigned long lastWeightRx_ms = 0;
+bool weightSeen = false;             // a weight packet has arrived on this connection
+int overTargetCount = 0;
+// These survive a crash or watchdog reset (not a power cycle):
+//  savedInterlock  a stop was being held: keep holding, don't restart a finished shot
+//  savedShot       a weighed shot was running: stop it, nothing is weighing it any more
+//  savedPaddleOn   how long the paddle has been on, so INTERLOCK_MAX_BREW_S spans resets
 #define INTERLOCK_HELD 0x5AFE5709
+#define SHOT_TRACKED   0x570BB1E5
 RTC_NOINIT_ATTR uint32_t savedInterlock;
+RTC_NOINIT_ATTR uint32_t savedShot;
+RTC_NOINIT_ATTR uint32_t savedPaddleOn_ms;
+RTC_NOINIT_ATTR uint32_t savedPaddleOnCheck;   // ~savedPaddleOn_ms when valid
 
 struct Shot {
   float start_timestamp_s; // Relative to runtime
@@ -194,6 +229,7 @@ struct Shot {
   bool learn;              // set at the end: this shot may adjust weightOffset
   float lastWeight;        // last accepted reading (NAN = none yet)
   float lastTime;
+  unsigned long start_ms;  // millis() at the start: shot times are differences, so millis() wrapping is harmless
 };
 
 //Initialize shot
@@ -211,6 +247,24 @@ timer_state lastTimerState = TIMER_IDLE;
 bool unitWarned = false;
 
 void setup() {
+  // First thing: put STOP where it belongs. After a crash or watchdog reset
+  // during a held stop, or during a weighed shot, the interlock opens again at
+  // once (and is released by the normal debounce if the paddle is in fact off).
+  bool resumeHold = false;
+  if(PADDLE_INTERLOCK){
+    bool warmReset = esp_reset_reason() != ESP_RST_POWERON;
+    resumeHold = warmReset && (savedInterlock == INTERLOCK_HELD || savedShot == SHOT_TRACKED);
+    digitalWrite(STOP, resumeHold ? HIGH : LOW);
+    pinMode(STOP, OUTPUT);
+    digitalWrite(STOP, resumeHold ? HIGH : LOW);  // core 3.x ignores a write before pinMode
+    interlockOpen = resumeHold;
+    savedInterlock = resumeHold ? INTERLOCK_HELD : 0;
+    savedShot = 0;
+    if(!warmReset){
+      savedPaddleOn_ms = 0;
+      savedPaddleOnCheck = ~0u;
+    }
+  }
   setCpuFrequencyMhz(80);
   Serial.begin(115200); // per-packet logging at 9600 baud adds loop latency
   EEPROM.begin(EEPROM_SIZE);
@@ -237,33 +291,33 @@ void setup() {
   }
   
   // initialize the GPIO hardware
-  if(PADDLE_INTERLOCK){
-    digitalWrite(STOP, LOW); // interlock closed: the paddle works normally
-    pinMode(STOP, OUTPUT);
-  }
-  pinMode(in, INPUT_PULLUP);
+  // The interlock board has its own pull-up (R13); the internal one would only
+  // add load for the sense optocoupler.
+  pinMode(in, PADDLE_INTERLOCK ? INPUT : INPUT_PULLUP);
+  digitalWrite(OUT, LOW);
   pinMode(OUT, OUTPUT);
   if(PADDLE_INTERLOCK){
     delay(20);
-    bool paddleOn = !digitalRead(in);
-    bool warmReset = esp_reset_reason() != ESP_RST_POWERON;
-    if(paddleOn && warmReset && savedInterlock == INTERLOCK_HELD){
-      // Reset while a stop was being held: keep holding until the paddle is off.
-      setInterlock(true);
-      Serial.println("reset during a held stop: interlock open until paddle off");
-    }else{
-      // Otherwise the paddle passes straight through, as on a stock machine.
-      setInterlock(false);
+    // While resuming a hold, start from "paddle on": the hold is then released
+    // only after the paddle has read off for PADDLE_DEBOUNCE_MS.
+    bool paddleOn = resumeHold ? true : !digitalRead(in);
+    if(resumeHold){
+      Serial.println("reset during a stop or a weighed shot: interlock open until paddle off");
     }
+    paddleState = paddleOn;
+    paddleOnCount = paddleOn ? PADDLE_ON_SAMPLES : 0;
+    paddleLastRawOn_ms = millis();
+    paddleOnAt_ms = millis();
     // A shot already running at boot is left to the paddle, not tracked
     // (taring partway through would overshoot the target).
     buttonPressed = paddleOn;
     newButtonState = paddleOn;
     paddleWasOn = paddleOn;
-    paddleOnSince_ms = millis();
-    for(int i=0; i<BUTTON_STATE_ARRAY_LENGTH; i++){
-      buttonArr[i] = paddleOn;
-    }
+    // Carry the paddle-on time across the reset, so INTERLOCK_MAX_BREW_S
+    // still ends a brew if the board keeps resetting.
+    uint32_t carried = (savedPaddleOnCheck == ~savedPaddleOn_ms) ? savedPaddleOn_ms : 0;
+    paddleOnSince_ms = millis() - (paddleOn ? carried : 0);
+    startPaddleTimer();
     startWatchdog();
   }
   pinMode(LED_RED, OUTPUT);
@@ -273,6 +327,7 @@ void setup() {
 
   // initialize the BLE hardware
   BLE.begin();
+  BLE.setTimeout(2000);   // ATT requests give up after 2 s (default 5 s): bounds how long loop() can block
   BLE.setLocalName("shotStopper");
   BLE.setAdvertisedService(weightService);
   weightService.addCharacteristic(weightCharacteristic);
@@ -311,13 +366,18 @@ void loop() {
       unitWarned = false;      // re-check the new connection
       lastBattery = -2;
       lastTimerState = TIMER_IDLE;
-      scale.init(); 
-      currentWeight = 0;
+      // A shot that lost its scale is ended first (which opens the interlock
+      // if it was being weighed): reconnecting can take many seconds.
       if(shot.brewing){
         shot.brewing = false;
         shot.end = ENDTYPE::DISCONNECT;
         setBrewingState(false);
       }
+      weightSeen = false;
+      if(!interlockOpen){
+        scale.init();
+      }
+      currentWeight = 0;
       if(scale.isConnected()){
         setColor(YELLOW);
       }
@@ -325,13 +385,20 @@ void loop() {
   else if(scale.isConnected()){
     scaleConnected_task();
   }
+
+  // Fast white blink: the interlock has been disabled (plugs look swapped).
+  if(interlockFault){
+    setColor((millis() / 250) % 2 ? WHITE : OFF);
+  }
 }
 
 void setBrewingState(bool brewing){
   if(brewing){
     Serial.println("shot started");
     shot.start_timestamp_s = seconds_f();
+    shot.start_ms = millis();
     shot.shotTimer = 0;
+    overTargetCount = 0;
     shot.datapoints = 0;
     shot.expected_end_s = MAX_SHOT_DURATION_S; // don't reuse the previous shot's prediction
     shot.flow = 0;
@@ -342,7 +409,8 @@ void setBrewingState(bool brewing){
     // Only trust the scale for this shot if it is streaming weight right now
     // and is set to grams. Otherwise the shot is left to the paddle.
     shot.tracked = true;
-    if(!TIMER_ONLY && scale.msSinceLastPacket() > STREAM_STALE_MS){
+    if(!TIMER_ONLY && (scale.msSinceLastPacket() > STREAM_STALE_MS
+                       || !weightSeen || millis() - lastWeightRx_ms > STREAM_STALE_MS)){
       Serial.println("no recent weight from the scale: shot left to the paddle");
       shot.tracked = false;
     }
@@ -353,6 +421,9 @@ void setBrewingState(bool brewing){
     if(!shot.tracked){
       setColor(MAGENTA);
       return;
+    }
+    if(PADDLE_INTERLOCK){
+      savedShot = SHOT_TRACKED;   // before any Bluetooth call: a reset from here on stops the shot
     }
     if (CAN_TARE_START_TIMER && AUTOTARE) {
       scale.tareStartTimer();
@@ -368,6 +439,20 @@ void setBrewingState(bool brewing){
     lastTareState = TARE_IDLE; // so the next TARE_CONFIRMED is seen as a transition
     Serial.println("Weight Timer End");
   }else{
+    // Stop the machine before anything else: the Bluetooth calls and prints
+    // below can take tens of milliseconds, or block if the link has failed.
+    // A scale lost during a weighed shot also stops it (STOP_ON_SCALE_LOSS):
+    // nothing else would before INTERLOCK_MAX_BREW_S. A shot that was never
+    // weighed is left to the paddle.
+    bool autoStop = false;
+    if(PADDLE_INTERLOCK){
+      bool lostScale = STOP_ON_SCALE_LOSS && ENDTYPE::DISCONNECT == shot.end && shot.tracked && paddleState;
+      if(!TIMER_ONLY && (ENDTYPE::WEIGHT == shot.end || ENDTYPE::TIME == shot.end || lostScale)){
+        setInterlock(true);
+        autoStop = true;
+      }
+      savedShot = 0;
+    }
     Serial.print("ShotEnded by ");
     switch (shot.end) {
       case ENDTYPE::TIME:
@@ -387,7 +472,7 @@ void setBrewingState(bool brewing){
         break;
     }
 
-    shot.end_s = seconds_f() - shot.start_timestamp_s;
+    shot.end_s = shotElapsed_s();
     scale.stopTimer();
     shot.learn = shot.tracked && !shot.disturbed
               && (!AUTOTARE || scale.tareState() == TARE_CONFIRMED);
@@ -405,14 +490,9 @@ void setBrewingState(bool brewing){
     Serial.println();
     flowCharacteristic.writeValue(0.0f);
     if(PADDLE_INTERLOCK){
-      // Open the interlock for an automatic stop. A scale lost during a
-      // weighed shot also stops it (STOP_ON_SCALE_LOSS): nothing else would
-      // before INTERLOCK_MAX_BREW_S. A shot that was never weighed is left
-      // to the paddle.
-      bool lostScale = STOP_ON_SCALE_LOSS && ENDTYPE::DISCONNECT == shot.end && shot.tracked && newButtonState;
-      if(!TIMER_ONLY && (ENDTYPE::WEIGHT == shot.end || ENDTYPE::TIME == shot.end || lostScale)){
-        setInterlock(true);
-        Serial.println("interlock open, waiting for paddle off");
+      if(autoStop){
+        Serial.println(interlockFault ? "plugs look swapped: interlock left closed"
+                                      : "interlock open, waiting for paddle off");
       }
     }
     else if(!TIMER_ONLY 
@@ -481,24 +561,32 @@ void calculateEndTime(Shot* s){
 
 // A reading is accepted into the shot only if it is consistent with the
 // previous accepted one: espresso doesn't arrive in big jumps, faster than
-// MAX_FLOW_GPS, or make the cup lighter.
+// MAX_FLOW_GPS, or make the cup lighter. The allowed rise grows with the time
+// since the last accepted reading, so a gap in the stream does not lock out
+// every reading that follows it.
 bool plausibleReading(Shot* s, float w, float t){
   if(isnan(s->lastWeight)){
     return w > -MAX_DROP_G;
   }
   float dw = w - s->lastWeight;
   float dt = t - s->lastTime;
-  if(fabs(dw) > MAX_STEP_G || dw < -MAX_DROP_G){
+  if(dw < -MAX_DROP_G){
     return false;
   }
-  if(dt >= 0.05 && dw / dt > MAX_FLOW_GPS){
-    return false;
+  if(dt < 0.05){
+    return dw <= MAX_STEP_G;
   }
-  return true;
+  return dw / dt <= MAX_FLOW_GPS;
 }
 
 float seconds_f(){
   return millis()/1000.0;
+}
+
+// Seconds since the current (or last) shot started. A difference of millis()
+// values, so it stays exact and survives millis() wrapping.
+float shotElapsed_s(){
+  return (millis() - shot.start_ms) / 1000.0f;
 }
 
 void setColor(int rgb[3]){
@@ -513,6 +601,15 @@ void setColor(int rgb[3]){
 // Sample the brew switch every BUTTON_READ_PERIOD_MS. Runs whether or not
 // the scale is connected, so the paddle interlock can always be released.
 void readButton(){
+  if(PADDLE_INTERLOCK){
+    // The paddle is debounced by paddleTick (normally from its timer).
+    if(!paddleTimerOk && millis() - lastButtonRead_ms >= BUTTON_READ_PERIOD_MS){
+      lastButtonRead_ms = millis();
+      paddleTick(NULL);
+    }
+    newButtonState = paddleState;
+    return;
+  }
   // Read button every period
   // Subtract, don't compare sums: this stays right when millis() wraps (49.7 days).
   if(millis() - lastButtonRead_ms >= BUTTON_READ_PERIOD_MS){
@@ -528,11 +625,8 @@ void readButton(){
     // Also assume the button is off for a few milliseconds
     // after the shot is done, there can be residual noise
     // from the reed switch
-    // Interlock mode uses a short window so a quick off-on of the paddle
-    // still starts the next shot.
-    int window = PADDLE_INTERLOCK ? (PADDLE_DEBOUNCE_MS / BUTTON_READ_PERIOD_MS) : BUTTON_STATE_ARRAY_LENGTH;
     newButtonState = 0;
-    for(int i=0; i<window; i++){
+    for(int i=0; i<BUTTON_STATE_ARRAY_LENGTH; i++){
       if(buttonArr[i]){
         newButtonState = 1;          
       }
@@ -542,7 +636,7 @@ void readButton(){
 
     //The reed switch measurements require a small amount of delay for accuracy.
     //  if the shot just stopped, assume that the reed switch should read "open" for the first 0.5s
-    if(REEDSWITCH && !shot.brewing && seconds_f() < (shot.start_timestamp_s + shot.end_s + 1)){
+    if(REEDSWITCH && !shot.brewing && shotElapsed_s() < shot.end_s + 1){
       //Serial.println("force reedSwitch Off");
       newButtonState = 0;
     }
@@ -550,9 +644,58 @@ void readButton(){
 }
 
 void setInterlock(bool open){
+  if(open && interlockFault){
+    return;   // plugs look swapped: opening would only make the machine stutter
+  }
+  if(open){
+    interlockOpened_ms = millis();
+  }
   digitalWrite(STOP, open ? HIGH : LOW);
   interlockOpen = open;
   savedInterlock = open ? INTERLOCK_HELD : 0;
+}
+
+// Runs every BUTTON_READ_PERIOD_MS from a timer, independently of loop():
+// debounces the paddle and closes the interlock as soon as the paddle has been
+// off for PADDLE_DEBOUNCE_MS, so the next paddle-on always reaches the machine.
+void paddleTick(void*){
+  unsigned long now = millis();
+  bool raw = !digitalRead(in);   // active low
+  if(raw){
+    if(paddleOnCount < 255){
+      paddleOnCount++;
+    }
+    paddleLastRawOn_ms = now;
+  }else{
+    paddleOnCount = 0;
+  }
+  if(!paddleState){
+    if(paddleOnCount >= PADDLE_ON_SAMPLES){
+      paddleState = true;
+      paddleOnAt_ms = now;
+    }
+  }else if(now - paddleLastRawOn_ms >= PADDLE_DEBOUNCE_MS){
+    paddleState = false;
+  }
+  if(interlockOpen && !paddleState){
+    digitalWrite(STOP, LOW);
+    interlockOpen = false;
+    savedInterlock = 0;
+    interlockReleased_ms = now;
+    interlockReleased = true;
+  }
+}
+
+void startPaddleTimer(){
+  static esp_timer_handle_t paddleTimer;
+  esp_timer_create_args_t args = {};
+  args.callback = &paddleTick;
+  args.name = "paddle";
+  paddleTimerOk = esp_timer_create(&args, &paddleTimer) == ESP_OK
+               && esp_timer_start_periodic(paddleTimer, BUTTON_READ_PERIOD_MS * 1000ULL) == ESP_OK;
+  if(!paddleTimerOk){
+    Serial.println("paddle timer failed to start: sampling from loop() instead");
+  }
 }
 
 void startWatchdog(){
@@ -564,34 +707,57 @@ void startWatchdog(){
 #else
   esp_task_wdt_init(WATCHDOG_S, true);
 #endif
-  esp_task_wdt_add(NULL);
+  if(esp_task_wdt_add(NULL) != ESP_OK){
+    Serial.println("watchdog failed to start");
+  }
 }
 
-// Close the interlock as soon as the paddle reads off (debounced), so the
-// next paddle-on always reaches the machine.
-// Also stop any brew that has had the paddle on for INTERLOCK_MAX_BREW_S.
-// This needs only the paddle, so it works without a scale.
+// The interlock itself is released by paddleTick. Here: report it, watch for
+// swapped plugs, and stop any brew that has had the paddle on for
+// INTERLOCK_MAX_BREW_S. That needs only the paddle, so it works without a scale.
 void paddleInterlock_task(){
   if(!PADDLE_INTERLOCK){
     return;
   }
+  unsigned long now = millis();
   if(newButtonState && !paddleWasOn){
-    paddleOnSince_ms = millis();
+    paddleOnSince_ms = paddleOnAt_ms;
   }
   paddleWasOn = newButtonState;
+  // Remember the paddle-on time for a reset (see setup()).
+  uint32_t onFor = (newButtonState && !interlockOpen) ? (uint32_t)(now - paddleOnSince_ms) : 0;
+  savedPaddleOn_ms = onFor;
+  savedPaddleOnCheck = ~onFor;
 
-  if(interlockOpen && !newButtonState){
-    setInterlock(false);
+  if(interlockReleased){
+    interlockReleased = false;
     Serial.println("paddle off, interlock closed");
+    // With the J3 and J4 plugs swapped, opening the interlock cuts the paddle
+    // off from the sense circuit: it reads "off" at once, the interlock closes,
+    // and the machine brews again.
+    swapSuspect = interlockReleased_ms - interlockOpened_ms < SWAP_RELEASE_MS;
   }
-  else if(INTERLOCK_MAX_BREW_S > 0 && !TIMER_ONLY && newButtonState && !interlockOpen
-  && millis() - paddleOnSince_ms > INTERLOCK_MAX_BREW_S * 1000UL){
+  if(swapSuspect){
+    if(now - interlockReleased_ms >= SWAP_REON_MS){
+      swapSuspect = false;
+    }else if(newButtonState){
+      swapSuspect = false;
+      interlockFault = true;
+      Serial.println("FAULT: paddle read off right after a stop, then on again. J3 and J4 swapped?"
+                     " Interlock disabled until restart: the paddle works by hand.");
+    }
+  }
+
+  if(INTERLOCK_MAX_BREW_S > 0 && !TIMER_ONLY && newButtonState && !interlockOpen && !interlockFault
+  && now - paddleOnSince_ms > INTERLOCK_MAX_BREW_S * 1000UL){
     Serial.println("paddle on too long: stopping the brew");
     if(shot.brewing && scale.isConnected()){
       shot.brewing = false;
       shot.end = ENDTYPE::TIME;
       setBrewingState(false);   // opens the interlock
     }else{
+      shot.brewing = false;
+      savedShot = 0;
       setInterlock(true);
     }
   }
@@ -603,7 +769,14 @@ void paddleInterlock_events(){
   if(newButtonState && !buttonPressed){
     Serial.println("Paddle on");
     buttonPressed = true;
-    if(!interlockOpen){
+    // Only weigh a shot that is caught at its start, and not one that follows
+    // a paddle-off so closely that the "off" may have been a dropout.
+    bool late = millis() - paddleOnAt_ms > PADDLE_TRACK_LATE_MS;
+    bool bounce = paddleOffEventSeen && millis() - lastPaddleOffEvent_ms < PADDLE_RETRACK_MS;
+    if(late || bounce){
+      Serial.println(late ? "noticed late: shot left to the paddle" : "right after a paddle-off: shot left to the paddle");
+    }
+    else if(!interlockOpen){
       shot.brewing = true;
       setBrewingState(shot.brewing);
     }
@@ -611,6 +784,8 @@ void paddleInterlock_events(){
   else if(!newButtonState && buttonPressed){
     Serial.println("Paddle off");
     buttonPressed = false;
+    lastPaddleOffEvent_ms = millis();
+    paddleOffEventSeen = true;
     if(shot.brewing){
       shot.brewing = false;
       shot.end = ENDTYPE::BUTTON;
@@ -731,13 +906,15 @@ void scaleConnected_task(){
   // arrives. Otherwise a stalled weight stream freezes the timer and neither
   // the predicted end time nor MAX_SHOT_DURATION_S can end the shot.
   if(shot.brewing){
-    shot.shotTimer = seconds_f() - shot.start_timestamp_s;
+    shot.shotTimer = shotElapsed_s();
   }
 
   // always call newWeightAvailable to actually receive the datapoint from the scale,
   // otherwise getWeight() will return stale data
   if(scale.newWeightAvailable()){
     currentWeight = scale.getWeight();
+    lastWeightRx_ms = millis();
+    weightSeen = true;
 
     Serial.print(currentWeight);
 
@@ -760,7 +937,17 @@ void scaleConnected_task(){
     lastTareState = tareNow;
 
     // update shot trajectory
-    float t = seconds_f()-shot.start_timestamp_s;
+    float t = shotElapsed_s();
+    // Backstop that does not depend on the trend line or on the readings being
+    // judged plausible: once the tare is confirmed, two readings in a row at
+    // or above the target end the shot.
+    if(shot.brewing && shot.tracked && !TIMER_ONLY
+    && (!AUTOTARE || tareNow == TARE_CONFIRMED)
+    && currentWeight >= goalWeight - weightOffset){
+      overTargetCount++;
+    }else{
+      overTargetCount = 0;
+    }
     if(shot.brewing && shot.tracked && !TIMER_ONLY && shot.datapoints < MAX_DATAPOINTS){
       if(plausibleReading(&shot, currentWeight, t)){
         shot.time_s[shot.datapoints] = t;
@@ -843,13 +1030,28 @@ void scaleConnected_task(){
   }
     
   //Max duration reached
+  // (An unweighed shot is left to the paddle in interlock mode, where
+  // INTERLOCK_MAX_BREW_S covers it; the other modes end it here as before.)
   if(!TIMER_ONLY 
   && shot.brewing 
-  && shot.tracked
+  && (shot.tracked || !PADDLE_INTERLOCK)
   && shot.shotTimer > MAX_SHOT_DURATION_S ){
     shot.brewing = false;
     Serial.println("Max brew duration reached");
     shot.end = ENDTYPE::TIME;
+    setBrewingState(shot.brewing);
+  }
+
+  // Weight readings arriving but none believable for READINGS_LOST_S: the
+  // shot can no longer be weighed. Same handling as a lost scale.
+  if(!TIMER_ONLY
+  && shot.brewing
+  && shot.tracked
+  && !isnan(shot.lastWeight)
+  && shot.shotTimer - shot.lastTime > READINGS_LOST_S){
+    Serial.println("weight readings lost (cup lifted?)");
+    shot.brewing = false;
+    shot.end = ENDTYPE::DISCONNECT;
     setBrewingState(shot.brewing);
   }
 
@@ -866,7 +1068,7 @@ void scaleConnected_task(){
   && shot.brewing
   && shot.tracked
   && (!AUTOTARE || scale.tareState() == TARE_CONFIRMED)
-  && shot.shotTimer >= shot.expected_end_s
+  && (shot.shotTimer >= shot.expected_end_s || overTargetCount >= 2)
   && shot.shotTimer >  MIN_SHOT_DURATION_S
   ){
     Serial.println("weight achieved");
@@ -883,7 +1085,7 @@ void scaleConnected_task(){
   && shot.end_s
   && shot.learn
   && currentWeight >= (goalWeight - weightOffset)
-  && seconds_f() > shot.start_timestamp_s + shot.end_s + DRIP_DELAY_S){
+  && shotElapsed_s() > shot.end_s + DRIP_DELAY_S){
     shot.start_timestamp_s = 0;
     shot.end_s = 0;
 
@@ -906,5 +1108,12 @@ void scaleConnected_task(){
       EEPROM.commit();
     }
     Serial.println();
+  }
+  // Give up on learning from a shot whose final weight never showed up (cup
+  // lifted early): a later, unrelated weight must not be taken for it.
+  else if(shot.start_timestamp_s && shot.end_s && !shot.brewing
+  && shotElapsed_s() > shot.end_s + DRIP_DELAY_S + 10){
+    shot.start_timestamp_s = 0;
+    shot.end_s = 0;
   }
 }

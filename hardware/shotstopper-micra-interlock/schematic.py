@@ -121,6 +121,7 @@ def section(x, y, w, h, title):
 section(20, 20, 940, 350, "Power")
 flag(50, 110, "J7 pin 2: +5 V from CN4", "right-up")
 wire((54, 110), (330, 110)); dot(240, 110)
+res_h(120, 110, "F1")
 e = diode_h(330, 110, "D5")
 wire((e, 110), (560, 110)); dot(470, 110)
 flag(50, 170, "USB VBUS", "right-up")
@@ -153,7 +154,7 @@ for x, kind, ref in ((745, "c", "C9"), (800, "r", "R11"), (855, "z", "D7")):
 text(730, 352, f"{lab('C9')}, {lab('R11')}, {lab('D7')} zener", size=13)
 flag(50, 235, "J7 pin 1", "right-up"); wire((54, 235), (150, 235), (150, 248)); gnd(150, 248)
 text(40, 340, "PS1 is fed from J7 only: on USB power alone the paddle sensing is off.", size=13, color="#444")
-text(40, 358, "D5 and D1 stop either supply back-feeding the other.", size=13, color="#444")
+text(40, 358, "D5 and D1 stop either supply back-feeding the other. F1: resettable fuse.", size=13, color="#444")
 
 # ------------------------------------------------------------------ ESP32 + USB
 section(20, 390, 940, 670, "ESP32-C3, USB, reset and status LED")
@@ -225,7 +226,7 @@ flag(1660, 465, "ISO5V", "top"); wire((1656, 465), (1574, 465)); res_h(1530, 465
 dot(1440, 465); dot(1440, 515); comp_v(1440, 465, "r", "", 50, end="")
 text(1429, 495, lab("R12"), "end", size=13)
 wire((1360, 515), (1530, 515)); e = diode_h(1530, 515, "D4"); wire((e, 515), (1656, 515)); flag(1660, 515, "PADDLE", "below")
-text(1000, 580, "Paddle on: about 3 mA flows ISO5V, R10, U1, D4, paddle switch, COMMON;", size=13, color="#444")
+text(1000, 580, "Paddle on: about 1.4 mA flows ISO5V, R10, U1, D4, paddle switch, COMMON;", size=13, color="#444")
 text(1000, 600, "U1 pulls SENSE low. Paddle off: D4 blocks, nothing flows in the machine's line.", size=13, color="#444")
 
 box(1140, 680, 150, 220, "J3 Buttons", "paddle's own plug")

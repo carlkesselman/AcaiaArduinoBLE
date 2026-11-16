@@ -25,8 +25,12 @@ $KCLI pcb export drill -o fab/gerbers/ --format excellon --excellon-separate-th 
   --excellon-units mm --generate-map --map-format gerberx2 $PCB > /dev/null
 $KCLI pcb export pos -o fab/centroid.csv --format csv --units mm --side both $PCB > /dev/null
 python3 bom.py fab/bom.csv
+# Assembly drawing: part references (fab layer) + silkscreen marks + outline
+$KCLI pcb export pdf -o fab/assembly-top.pdf -l F.Fab,F.Silkscreen,Edge.Cuts --black-and-white \
+  --mode-single --scale 0 --sketch-pads-on-fab-layers $PCB > /dev/null
 python3 schematic.py schematic.svg
 (cd fab/gerbers && zip -q -r ../shotstopper-micra-interlock-gerbers.zip .)
+cp ORDER_NOTES.md fab/
 
 mkdir -p renders
 for side in top bottom; do

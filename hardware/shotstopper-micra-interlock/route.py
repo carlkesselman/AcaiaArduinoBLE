@@ -63,8 +63,8 @@ for k, p in enumerate(pads):
             smd_own |= m
     pad_cells.append((p["net"], masks, (p["x"], p["y"]), p["ref"] + "." + p["pin"]))
 
-for hx, hy in D.MOUNTING_HOLES:
-    ko = np.hypot(X - hx, Y - hy) < D.MOUNT_KEEPOUT_R
+for (hx, hy), kr in zip(D.MOUNTING_HOLES, D.MOUNT_KEEPOUT_R):
+    ko = np.hypot(X - hx, Y - hy) < kr
     for L in LAYERS:
         copper[L][ko] = -2
 
@@ -222,10 +222,10 @@ def net_masks(n):
 
 
 # ---- routing order --------------------------------------------------------------------
-ORDER = ["USB_DP", "USB_DN", "VUSB", "CC1", "CC2", "EN", "GND", "+3V3", "SHIELD", "LEDK_B", "LEDK_G", "LEDK_R",
-         "LED_B", "LED_G", "LED_R", "BOOT", "STOP", "K1_A", "SENSE",
+ORDER = ["USB_DP", "USB_DN", "VUSB", "CC1", "CC2", "EN", "SENSE", "STOP", "BOOT", "VIN", "GND", "+3V3", "SHIELD", "LEDK_B", "LEDK_G", "LEDK_R",
+         "LED_B", "LED_G", "LED_R", "K1_A",
          "ISO5V", "PADDLE", "BRAIN", "KEY2", "KEY3", "COMMON", "U1_K", "U1_A",
-         "VIN_J", "VPS", "VIN"]
+         "VIN_J", "VIN_F", "VPS"]
 ORDER = [n for n in ORDER if n in D.NETS] + [n for n in D.NETS if n not in ORDER]
 if len(sys.argv) > 2:
     ORDER = sys.argv[2].split(",") + [n for n in ORDER if n not in sys.argv[2].split(",")]

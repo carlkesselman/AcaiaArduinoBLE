@@ -69,7 +69,8 @@ def outline_polygon(step=0.1):
 
 # --- mechanical: identical to V3.1 so the board drops into the same case ---------
 MOUNTING_HOLES = [g(70.485, 92.202), g(107.315, 68.072)]
-MOUNT_KEEPOUT_R = 3.3              # copper keep-out radius around the M3 holes
+# copper keep-out radius around each M3 hole: H1 (logic side), H2 (among the machine-side nets)
+MOUNT_KEEPOUT_R = (3.3, 3.8)
 
 # --- Machine connectors: one 1x4 latching header each, in the middle four holes of
 # the even row of V3.1's 2x8 pattern, where V3.1 fits them for the Micra. Header
@@ -145,7 +146,7 @@ PARTS = {
            PWR_PIN1 + (PWR_ROT,)),
     # ---- interlock section ----
     "K1": ("CPC1117N", "Package_SO:SOP-4_3.8x4.1mm_P2.54mm", "CPC1117NTR", "Littelfuse",
-           "OptoMOS relay 1-Form-B (normally closed) 60V 120mA", (32.12, 29.2, 0)),
+           "OptoMOS relay 1-Form-B (normally closed) 60V 150mA", (32.12, 29.2, 0)),
     "U1": ("EL357N", "Package_SO:SO-4_4.4x3.6mm_P2.54mm", "EL357N(C)(TA)-G", "Everlight",
            "Optocoupler, paddle sense", (31.92, 34.6, 180)),
     # PS1 runs from the machine's 5 V only (J7 through D6), never from USB: with the
@@ -156,23 +157,31 @@ PARTS = {
     # D5: reverse-polarity protection for the hand-soldered J7, and stops USB 5 V
     # from back-feeding the machine's CN4 rail.
     "D5": ("PMEG6010CEH", "Diode_SMD:D_SOD-123F", "PMEG6010CEH,115", "Nexperia",
-           "Schottky 60 V 1 A: J7 5 V into VIN", (30.3, 39.85, 0)),
+           "Schottky 60 V 1 A: J7 5 V into VIN", (24.6, 29.7, 0)),
     "D6": ("B0520WS", "Diode_SMD:D_SOD-323", "B0520WS-7-F", "Diodes Inc",
-           "Schottky 20 V 0.5 A: J7 5 V into PS1", (30.3, 37.75, 0)),
+           "Schottky 20 V 0.5 A: J7 5 V into PS1", (24.6, 31.2, 0)),
+    # F1 limits what a fault on this board (shorted C3, C8 or PS1) can draw from the
+    # machine's CN4 5 V supply. Normal draw is about 0.14 A.
+    "F1": ("0.5A", "Fuse:Fuse_1206_3216Metric", "MF-NSMF050-2", "Bourns",
+           "Resettable fuse 0.5 A hold / 1 A trip: J7 input", (30.3, 38.7, 0)),
     # D7 clamps the isolated rail if PS1 ever runs unloaded (R11 open), so the sense
     # circuit can never put more than about 6.5 V behind R10 on the paddle line.
     "D7": ("6.2V", "Diode_SMD:D_SOD-123", "MMSZ5234BT1G", "onsemi",
-           "Zener 6.2 V 500 mW: isolated rail clamp", (40.0, 22.5, 0)),
-    "D4": ("1N4148WS", "Diode_SMD:D_SOD-323", "1N4148WS-7-F", "Diodes Inc", "Signal diode", (39.02, 32.45, 180)),
+           "Zener 6.2 V 500 mW: isolated rail clamp", (40.0, 23.4, 0)),
+    "D4": ("1N4148WS", "Diode_SMD:D_SOD-323", "1N4148WS-7-F", "Diodes Inc", "Signal diode", (39.02, 32.7, 180)),
     "R1": ("390", R0603, "RC0603FR-07390RL", "Yageo", "K1 LED current", (26.87, 27.4, 90)),
     "R9": ("10k", R0603, "RC0603FR-0710KL", "Yageo", "K1 pull-down (closed in reset)", (22.6, 27.6, 0)),
-    # R10/R12: about 1.7 mA through U1's LED with the paddle on. R12 < R10 keeps the
-    # LED off when PS1 leaks into a 3.3 V paddle line with the paddle off.
-    "R10": ("1k", R0603, "RC0603FR-071KL", "Yageo", "Paddle sense current", (41.22, 34.2, 0)),
+    # R10: about 1.4 mA through U1's LED with the paddle on. 2.2 k (not less) also
+    # limits what the sense branch can push into the control board's input in a
+    # fault (R11 open, a reversed J4, or the control board unpowered).
+    "R10": ("2.2k", R0603, "RC0603FR-072K2L", "Yageo", "Paddle sense current", (41.22, 34.2, 0)),
     # R11: about 21 mA at 4.6 V, PS1's 10 % minimum load (unloaded, its output is
     # unspecified and can rise well above 5 V). About 0.1 W, hence 1206.
-    "R11": ("220", R1206, "RC1206FR-07220RL", "Yageo", "DC-DC minimum load (0.25 W)", (43.62, 31.15, 90)),
-    "R12": ("680", R0603, "RC0603FR-07680RL", "Yageo", "U1 LED leakage shunt", (38.22, 34.2, 0)),
+    "R11": ("220", R1206, "RC1206FR-07220RL", "Yageo", "DC-DC minimum load (0.25 W)", (37.2, 20.9, 0)),
+    # R12 must stay high: a low value here bypasses U1's LED, and then a shorted D4
+    # with PS1 off pulls the paddle line low through R12, R10 and R11 (the machine
+    # would brew with the paddle off). At 100 k the LED blocks that path.
+    "R12": ("100k", R0603, "RC0603FR-07100KL", "Yageo", "U1 LED leakage shunt", (38.22, 34.2, 0)),
     "R13": ("47k", R0603, "RC0603FR-0747KL", "Yageo", "Paddle sense pull-up", (21.6, 25.9, 0)),
     "C8": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC input", (34.7, 39.4, 0)),
     "C9": ("10u", C0805, "CL21A106KAYNNNE", "Samsung", "DC-DC output", (43.72, 27.15, 90)),
@@ -188,7 +197,8 @@ NETS = {
                       ("SW1", "1"), ("SW2", "1"), ("C1", "2"), ("C2", "2"), ("C3", "2"), ("C4", "2"),
                       ("C5", "2"), ("C6", "2"), ("C7", "2"), ("R6", "2"), ("R7", "2"), ("R8", "2"),
                       ("J7", "1"), ("K1", "2"), ("U1", "3"), ("R9", "1"), ("PS1", "1"), ("C8", "2")],
-    "VIN_J": [("J7", "2"), ("D5", "2"), ("D6", "2")],
+    "VIN_J": [("J7", "2"), ("F1", "2")],
+    "VIN_F": [("F1", "1"), ("D5", "2"), ("D6", "2")],
     "VPS": [("D6", "1"), ("PS1", "2"), ("C8", "1")],
     "+3V3": [("U3", "1"), ("U2", "5"), ("C1", "1"), ("C2", "1"), ("C4", "1"), ("R2", "1"),
              ("D2", "1"), ("D2", "3"), ("D2", "5"), ("R13", "1")],
@@ -223,7 +233,7 @@ NETS = {
 MACHINE_NETS = {"ISO5V", "COMMON", "U1_A", "U1_K", "PADDLE", "BRAIN", "KEY2", "KEY3"}
 LOGIC_NETS = set(NETS) - MACHINE_NETS
 
-TRACK_W = {"VIN": 0.4, "VIN_J": 0.4, "VPS": 0.3, "VUSB": 0.3, "+3V3": 0.3, "GND": 0.3,
+TRACK_W = {"VIN": 0.4, "VIN_J": 0.4, "VIN_F": 0.4, "VPS": 0.3, "VUSB": 0.3, "+3V3": 0.3, "GND": 0.3,
            # USB-C signal pads are 0.5 mm apart
            "USB_DP": 0.15, "USB_DN": 0.15, "CC1": 0.15, "CC2": 0.15}
 DEFAULT_TRACK_W = 0.25

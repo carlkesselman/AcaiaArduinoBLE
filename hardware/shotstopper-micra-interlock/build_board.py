@@ -71,7 +71,7 @@ def header_fp(n, name):
         pad.SetNumber(str(i + 1))
         pad.SetAttribute(pcbnew.PAD_ATTRIB_PTH)
         pad.SetShape(pcbnew.PAD_SHAPE_RECT if i == 0 else pcbnew.PAD_SHAPE_CIRCLE)
-        pad.SetSize(V(1.7, 1.7)); pad.SetDrillSize(V(1.0, 1.0))
+        pad.SetSize(V(1.8, 1.8)); pad.SetDrillSize(V(1.1, 1.1))   # 0.63 mm square pin, 0.96 mm max diagonal
         pad.SetLayerSet(pcbnew.PAD.PTHMask())
         fp.Add(pad); pad.SetPosition(V(0, 2.54 * i))
     half = (2.54 * (n - 1) + 2.6 + 2.54) / 2
@@ -122,6 +122,11 @@ for ref, (value, fpid, mpn, mfr, desc, place) in D.PARTS.items():
         for pad in list(fp.Pads()):     # not needed at 0.3 W, and below PCBWay's 0.3 mm drill
             if pad.GetDrillSize().x > 0:
                 fp.Remove(pad)
+    if ref == "USB1":                   # front shell slots: 1.4 mm long as on HRO's drawing and V3.1
+        for pad in fp.Pads():           # (the library's 1.2 mm is at PCBWay's slot length/width limit)
+            d = pad.GetDrillSize()
+            if abs(pcbnew.ToMM(d.y) - 1.2) < 0.01 and abs(pcbnew.ToMM(d.x) - 0.6) < 0.01:
+                pad.SetDrillSize(V(0.6, 1.4)); pad.SetSize(V(1.0, 1.8))
     x, y, rot = place
     fp.SetPosition(V(x, y))
     fp.SetOrientationDegrees(rot)
@@ -152,7 +157,7 @@ for i, (x, y) in enumerate(D.MOUNTING_HOLES):
     pad.SetSize(V(3.2, 3.2)); pad.SetDrillSize(V(3.2, 3.2))
     pad.SetLayerSet(pcbnew.PAD.UnplatedHoleMask())
     fp.Add(pad); pad.SetPosition(V(x, y))
-    for layer, r, w in ((pcbnew.F_CrtYd, D.MOUNT_KEEPOUT_R, 0.05), (pcbnew.F_SilkS, 1.95, 0.15)):
+    for layer, r, w in ((pcbnew.F_CrtYd, D.MOUNT_KEEPOUT_R[i], 0.05), (pcbnew.F_SilkS, 1.95, 0.15)):
         c = pcbnew.PCB_SHAPE(fp, pcbnew.SHAPE_T_CIRCLE)
         c.SetCenter(V(x, y)); c.SetEnd(V(x + r, y)); c.SetLayer(layer); c.SetWidth(MM(w))
         fp.Add(c)

@@ -1,34 +1,33 @@
 Item,Designator,Qty,Manufacturer,Mfg Part #,Description / Value,Package/Footprint,Type,Notes
-1,U3,1,Espressif,ESP32-C3-WROOM-02-N4,"ESP32-C3-WROOM-02-N4 - ESP32-C3 module, 4 MB flash, PCB antenna",ESP32-C3-WROOM-02,SMD,
-2,USB1,1,HRO,TYPE-C-31-M-12,USB-C - USB-C receptacle (power + programming),USB_C_Receptacle_HRO_TYPE-C-31-M-12,SMD,
+1,U3,1,Espressif,ESP32-C3-WROOM-02-N4,"ESP32-C3-WROOM-02-N4 - ESP32-C3 module, 4 MB flash, PCB antenna",ESP32-C3-WROOM-02,SMD,ESP32-C3-WROOM-02-H4 is an acceptable alternate
+2,USB1,1,HRO,TYPE-C-31-M-12,USB-C - USB-C receptacle (power + programming),USB_C_Receptacle_HRO_TYPE-C-31-M-12,SMD,SMD pads reflow; the four shell tabs are plated slots without paste: hand solder them
 3,U2,1,Texas Instruments,TLV75733PDBVR,TLV75733P - LDO 3.3 V 1 A,SOT-23-5,SMD,
-4,"D1,D5",2,Nexperia,"PMEG6010CEH,115",PMEG6010CEH,D_SOD-123F,SMD,
-5,D2,1,MEIHUA,MHP5050RGBDT,"RGB - RGB LED 5050 (LCSC C409780, as V3.1); anodes 1/3/5, cathodes 2 B, 4 G, 6 R",LED_RGB_5050_MHP,SMD,LCSC C409780 (as ShotStopper V3.1); cathode mark (pin 2 corner) at the silkscreen dot
+4,"D1,D5",2,Nexperia,"PMEG6010CEH,115",PMEG6010CEH - Schottky 60 V 1 A: USB 5 V into VIN,D_SOD-123F,SMD,
+5,D2,1,MEIHUA,MHP5050RGBDT,"RGB - RGB LED 5050 (LCSC C409780, as V3.1); anodes 1/3/5, cathodes 2 B, 4 G, 6 R",LED_RGB_5050_MHP,SMD,Source by LCSC C409780. Cathode mark (pin 2 corner) at the silkscreen dot
 6,D3,1,Nexperia,"PRTR5V0U2X,215",PRTR5V0U2X - USB ESD protection,SOT-143,SMD,
-7,SW1,1,XKB,TS-1187A-B-A-B,"BOOT - Tactile switch (boot, GPIO9)",SW_Push_1P1T_XKB_TS-1187A,SMD,
-8,SW2,1,XKB,TS-1187A-B-A-B,"RESET - Tactile switch (reset, EN)",SW_Push_1P1T_XKB_TS-1187A,SMD,
-9,C1,1,Samsung,CL10A106KP8NNNC,10u - 3V3 bulk,C_0603_1608Metric,SMD,
-10,"C2,C6",2,Samsung,CL10B104KB8NNNC,0.1u,C_0603_1608Metric,SMD,
-11,"C3,C4",2,Samsung,CL10A475KO8NNNC,4.7u,C_0603_1608Metric,SMD,
-12,C5,1,Samsung,CL10A105KB8NNNC,1u - EN delay,C_0603_1608Metric,SMD,
-13,C7,1,Samsung,CL10B472KB8NNNC,4.7n - USB shield to GND,C_0603_1608Metric,SMD,
-14,"R2,R9",2,Yageo,RC0603FR-0710KL,10k,R_0603_1608Metric,SMD,
-15,"R3,R4,R5",3,Yageo,RC0603FR-07499RL,499,R_0603_1608Metric,SMD,
-16,"R6,R7",2,Yageo,RC0603FR-075K1L,5.1k,R_0603_1608Metric,SMD,
-17,R8,1,Yageo,RC0603FR-071ML,1M - USB shield to GND,R_0603_1608Metric,SMD,
-18,J3,1,TE Connectivity,280371-1,Buttons - 1x4 2.54 mm latching header: paddle plug,Header_1x04_Latching,Thru-hole,TE AMPMODU MOD II header (mates the Micra paddle plug); pin 1 = square pad; latch wall on the side marked with the thick silkscreen bar
-19,J4,1,TE Connectivity,280371-1,Brain - 1x4 2.54 mm latching header: cable to CN9,Header_1x04_Latching,Thru-hole,"As J3 (mates the CN9 cable, housing TE 280359); latch wall on the thick silkscreen bar"
-20,J7,1,TE Connectivity,280370-1,"PWR - 1x2 2.54 mm latching header: 5 V from CN4 (1 = GND, 2 = +5 V)",Header_1x02_Latching,Thru-hole,"TE AMPMODU MOD II header (mates housing TE 280358, 5 V from CN4); latch wall on the thick silkscreen bar (board edge side), or + and - swap"
-21,K1,1,Littelfuse,CPC1117NTR,CPC1117N - OptoMOS relay 1-Form-B (normally closed) 60V 120mA,SOP-4_3.8x4.1mm_P2.54mm,SMD,Normally-CLOSED type; do not substitute a normally-open relay
-22,U1,1,Everlight,EL357N(C)(TA)-G,"EL357N - Optocoupler, paddle sense",SO-4_4.4x3.6mm_P2.54mm,SMD,
-23,PS1,1,Mornsun,B0505S-1WR3,B0505S-1WR3 - Isolated DC-DC 5V->5V 1W SIP-4,Converter_DCDC_Murata_MEE1SxxxxSC_THT,Thru-hole,"Through-hole SIP-4, 5 V in / 5 V out"
-24,D6,1,Diodes Inc,B0520WS-7-F,B0520WS - Schottky 20 V 0.5 A: J7 5 V into PS1,D_SOD-323,SMD,
-25,D7,1,onsemi,MMSZ5234BT1G,6.2V - Zener 6.2 V 500 mW: isolated rail clamp,D_SOD-123,SMD,
-26,D4,1,Diodes Inc,1N4148WS-7-F,1N4148WS - Signal diode,D_SOD-323,SMD,
-27,R1,1,Yageo,RC0603FR-07390RL,390 - K1 LED current,R_0603_1608Metric,SMD,
-28,R10,1,Yageo,RC0603FR-071KL,1k - Paddle sense current,R_0603_1608Metric,SMD,
-29,R11,1,Yageo,RC1206FR-07220RL,220 - DC-DC minimum load (0.25 W),R_1206_3216Metric,SMD,
-30,R12,1,Yageo,RC0603FR-07680RL,680 - U1 LED leakage shunt,R_0603_1608Metric,SMD,
-31,R13,1,Yageo,RC0603FR-0747KL,47k - Paddle sense pull-up,R_0603_1608Metric,SMD,
-32,C8,1,Samsung,CL21A475KAQNNNE,4.7u - DC-DC input,C_0805_2012Metric,SMD,
-33,C9,1,Samsung,CL21A106KAYNNNE,10u - DC-DC output,C_0805_2012Metric,SMD,
+7,"SW1,SW2",2,XKB,TS-1187A-B-A-B,"BOOT / RESET - Tactile switch (boot, GPIO9)",SW_Push_1P1T_XKB_TS-1187A,SMD,Source by LCSC C318884
+8,C1,1,Samsung,CL10A106KP8NNNC,10uF 10V X5R 20% 0603 ceramic capacitor,C_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+9,"C2,C6",2,Samsung,CL10B104KB8NNNC,0.1uF 50V X7R 10% 0603 ceramic capacitor,C_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+10,"C3,C4",2,Samsung,CL10A475KO8NNNC,4.7uF 16V X5R 10% 0603 ceramic capacitor,C_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+11,C5,1,Samsung,CL10A105KB8NNNC,1uF 50V X5R 10% 0603 ceramic capacitor,C_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+12,C7,1,Samsung,CL10B472KB8NNNC,4.7nF 50V X7R 10% 0603 ceramic capacitor,C_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+13,"R2,R9",2,Yageo,RC0603FR-0710KL,10k ohm 1% 0603 thick-film resistor,R_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+14,"R3,R4,R5",3,Yageo,RC0603FR-07499RL,499 ohm 1% 0603 thick-film resistor,R_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+15,"R6,R7",2,Yageo,RC0603FR-075K1L,5.1k ohm 1% 0603 thick-film resistor,R_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+16,R8,1,Yageo,RC0603FR-071ML,1M ohm 1% 0603 thick-film resistor,R_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+17,"J3,J4",2,TE Connectivity,280371-1,Buttons / Brain - 1x4 2.54 mm latching header: paddle plug,Header_1x04_Latching,Thru-hole,"Through-hole, hand solder. Pin 1 = square pad; latch (solid) wall on the side marked LATCH / thick silkscreen bar"
+18,J7,1,TE Connectivity,280370-1,"PWR - 1x2 2.54 mm latching header: 5 V from CN4 (1 = GND, 2 = +5 V)",Header_1x02_Latching,Thru-hole,"Through-hole, hand solder. latch (solid) wall on the side marked LATCH / thick silkscreen bar (toward the board edge); reversed = + and - swapped"
+19,K1,1,Littelfuse,CPC1117NTR,CPC1117N - OptoMOS relay 1-Form-B (normally closed) 60V 150mA,SOP-4_3.8x4.1mm_P2.54mm,SMD,Normally-CLOSED (1-Form-B) type: NO SUBSTITUTION. Pin 1 at the silkscreen dot
+20,U1,1,Everlight,EL357N(C)(TA)-G,"EL357N - Optocoupler, paddle sense",SO-4_4.4x3.6mm_P2.54mm,SMD,Pin 1 at the silkscreen dot (part is turned 180 degrees)
+21,PS1,1,Mornsun,B0505S-1WR3,B0505S-1WR3 - Isolated DC-DC 5V->5V 1W SIP-4,Converter_DCDC_Murata_MEE1SxxxxSC_THT,Thru-hole,"Through-hole SIP-4, hand solder (no reflow). Pin 1 = square pad"
+22,D6,1,Diodes Inc,B0520WS-7-F,B0520WS - Schottky 20 V 0.5 A: J7 5 V into PS1,D_SOD-323,SMD,
+23,F1,1,Bourns,MF-NSMF050-2,0.5A - Resettable fuse 0.5 A hold / 1 A trip: J7 input,Fuse_1206_3216Metric,SMD,"Any 1206 PPTC with 0.5 A hold, 1 A trip, >= 6 V is acceptable"
+24,D7,1,onsemi,MMSZ5234BT1G,6.2V - Zener 6.2 V 500 mW: isolated rail clamp,D_SOD-123,SMD,
+25,D4,1,Diodes Inc,1N4148WS-7-F,1N4148WS - Signal diode,D_SOD-323,SMD,
+26,R1,1,Yageo,RC0603FR-07390RL,390 ohm 1% 0603 thick-film resistor,R_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+27,R10,1,Yageo,RC0603FR-072K2L,2.2k ohm 1% 0603 thick-film resistor,R_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+28,R11,1,Yageo,RC1206FR-07220RL,220 ohm 1% 1206 0.25W thick-film resistor,R_1206_3216Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+29,R12,1,Yageo,RC0603FR-07100KL,100k ohm 1% 0603 thick-film resistor,R_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+30,R13,1,Yageo,RC0603FR-0747KL,47k ohm 1% 0603 thick-film resistor,R_0603_1608Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+31,C8,1,Samsung,CL21A475KAQNNNE,4.7uF 25V X5R 10% 0805 ceramic capacitor,C_0805_2012Metric,SMD,any equivalent value/size/rating from a major maker is acceptable
+32,C9,1,Samsung,CL21A106KAYNNNE,10uF 25V X5R 10% 0805 ceramic capacitor,C_0805_2012Metric,SMD,any equivalent value/size/rating from a major maker is acceptable

@@ -44,6 +44,12 @@ sketch.
 On an Apple Silicon Mac, the ESP32-C3 compiler for this core is an Intel
 binary: install Rosetta once (`softwareupdate --install-rosetta`).
 
+The paddle-interlock logic has a host test: `tests/interlock/run.sh` builds the
+real sketch and library for this computer against stub Arduino and Bluetooth
+headers and runs scripted scenarios (normal shots, early paddle-off, scale
+loss, glitches on the sense line, resets, stalled Bluetooth writes, swapped
+plugs). It needs only a C++17 compiler.
+
 PlatformIO's `espressif32@6.10.0` builds against Arduino-ESP32 core 2.0.17.
 The seller's shotStopper manual calls for core 3.3.3 in the Arduino IDE. The
 sketch compiles against both (the watchdog set-up is the only core-specific

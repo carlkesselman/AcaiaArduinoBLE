@@ -67,22 +67,26 @@ netlist itself is in `design.py`).
   paddle line. Driving GPIO5 high opens it, so the control board sees the paddle
   as off and stops the shot. With no drive, it is closed.
 - **U1** senses the paddle independently of K1. A small isolated 5 V supply
-  (PS1) pushes about 1.5 mA through U1's LED and D4 into the paddle wire. When
+  (PS1) pushes about 1.4 mA through U1's LED and D4 into the paddle wire. When
   the paddle shorts that wire to COMMON, U1 conducts and pulls GPIO8 low. This
   works with K1 open or closed, so the firmware always knows where the paddle is.
 - **D4** stops the control board's own pull-up from feeding back into the sense
-  circuit. **R12** (680 Ω, smaller than R10) soaks up the leakage when the
-  control board's pull-up is about 3.3 V, so a floating line doesn't read as
-  "paddle on".
+  circuit. **R10** (2.2 kΩ) sets the sense current and limits what this branch
+  could ever push into the control board's input. **R12** (100 kΩ) keeps U1's
+  LED off on leakage alone. R12 must stay high: with a low value, a shorted D4
+  on an unpowered board would pull the paddle line low through R12, R10 and
+  R11, and the machine would brew with the paddle off.
 - **R11** (220 Ω, 1206) draws about 21 mA so that PS1 has its 10 % minimum load. With
   less, its output is unspecified and can rise well above 5 V.
 - The ESP32 side and the machine side share no copper. They connect only
   through K1, U1 and PS1. The minimum copper gap between the two sides is
   0.8 mm (between PS1's own pins). That is **functional isolation for a
   low-voltage paddle line, not mains-rated isolation.**
-- Power: 5 V from CN4 comes in through D5 and USB 5 V through D1, so neither
-  source back-feeds the other and a reversed J7 does no damage. That shared
-  rail (about 4.6 V) feeds the 3.3 V regulator (U2).
+- Power: 5 V from CN4 comes in through a resettable fuse (F1, 0.5 A) and D5,
+  and USB 5 V through D1. Neither source back-feeds the other, a reversed J7
+  does no damage, and a fault on this board cannot draw more than the fuse
+  allows from the machine's supply. The shared rail (about 4.6 V) feeds the
+  3.3 V regulator (U2).
 - PS1 (B0505S-1WR3, 5 V in, 5 V out) is fed from J7 only, through D6. **On USB
   power alone the paddle sensing is off**, so the board can never drive the
   control board's paddle input while the machine is off. PS1 is not on the
@@ -95,14 +99,35 @@ netlist itself is in `design.py`).
   control board's own 5 V pull-up, so nothing flows into or out of the paddle
   input. The isolated rail (4.6–5.5 V, 6.5 V at most with D7) minus D4's drop
   stays at or below the control board's 5 V.
-- Paddle on: the sense current (about 3 mA) flows from PS1 through the paddle
+- Paddle on: the sense current (about 1.4 mA) flows from PS1 through the paddle
   switch and back to PS1 on this board. None of it flows in the CN9 cable.
 - K1 adds at most 16 Ω in series (8 mV at the measured 0.5 mA) when closed and
   about 1 µA of leakage when open.
 - Board unpowered or J7 unplugged: PS1 is off, D4 blocks, K1 is closed. The
   paddle line is as on a stock machine.
-- Extra load on CN4: PS1 draws roughly 60 mA from the machine's 5 V, on top of
-  the ESP32's draw that V3.1 already has.
+- Extra load on CN4: PS1 draws about 35-40 mA from the machine's 5 V, on top
+  of the ESP32's draw that V3.1 already has (about 125-140 mA in total, with
+  peaks near 400 mA only during WiFi updates).
+
+### If something on this board fails
+
+Worked through for every part (open and short). What the machine can see:
+
+| Fault | Effect on the machine |
+|---|---|
+| K1 fails open, or GPIO5 stuck high | Never brews until fixed or the board is bypassed. Nothing is damaged |
+| K1 fails shorted, K1 drive open | No automatic stop; the paddle still starts and stops |
+| U1, R10, R13 or D4 open | No paddle sensing: stock behaviour, no automatic stop |
+| U1's output shorted, GPIO8 stuck low | Firmware sees "paddle on" for ever, stops at 90 s and holds: never brews |
+| D4 shorted | Board powered: no effect. Board unpowered: input stays above 4.5 V (R12), no brew |
+| R11 open | Isolated rail rises to D7's 6.2-6.6 V; at most about 40 µA reaches the input, under 5.4 V |
+| C3, C8 or PS1 shorted | F1 limits the current from CN4; the board goes dead, the machine behaves as stock |
+| J4 header or cable fitted reversed | **Machine brews as soon as it is powered**, and about 0.6 mA is pulled out of the input. Caught by the bench check below, before the board goes in |
+| J3 and J4 plugs swapped | Works by hand; the first automatic stop restarts within 0.3 s, the firmware detects it and disables the interlock (fast white blink) |
+| J7 fitted reversed | Board dead (D5, D6 block). Do not connect USB in that state |
+
+The control board's input circuit is not known. Limits above are for an input
+with protection diodes to its 5 V and ground, or behind a series resistor.
 
 GPIO8 is V3.1's "IN" pin. V3.1's "OUT" (GPIO6, remote start) is not connected.
 
@@ -124,14 +149,18 @@ What the firmware does in this mode:
 | Paddle on | Machine brews; the shot is tracked: tare, reset and start the timer |
 | Predicted target weight, or `MAX_SHOT_DURATION_S` | GPIO5 high: K1 opens and the shot stops |
 | Paddle still on after the stop | K1 stays open; no new shot |
-| Paddle off (50 ms debounce, `PADDLE_DEBOUNCE_MS`) | GPIO5 low: K1 closes, so the next paddle-on always brews |
+| Paddle off for 0.3 s (`PADDLE_DEBOUNCE_MS`) | GPIO5 low: K1 closes, so the next paddle-on always brews. Done from a 5 ms timer, so it does not wait for Bluetooth |
 | Paddle off before the target | Shot stops; K1 never opens |
 | Scale lost during a weighed shot | GPIO5 high: the shot stops (`STOP_ON_SCALE_LOSS`; set it `false` to leave the shot to the paddle) |
 | Scale not connected when the paddle goes on | K1 stays closed; the paddle works by hand |
 | Paddle on for `INTERLOCK_MAX_BREW_S` (90 s), with or without a scale | GPIO5 high: the brew stops until the paddle is off |
-| Reconnect, or reset, partway through a shot | The shot keeps running on the paddle and isn't re-tared |
+| Cup lifted or scale knocked for 5 s during a weighed shot (`READINGS_LOST_S`) | Treated like a lost scale: the shot stops |
+| Scale connects partway through a shot | Within 5 s of paddle-on the shot is tared and weighed; later than that it is left to the paddle |
 | Crash or watchdog reset during a held stop | K1 closes for the fraction of a second the ESP32 takes to restart (the machine may click on briefly), then the stop is held again until the paddle is off |
-| `loop()` stalls for 20 s (`WATCHDOG_S`) | The watchdog resets the board, and K1 closes |
+| Crash or watchdog reset during a weighed shot | The shot is stopped at restart and held until the paddle is off: nothing is weighing it any more |
+| Board keeps resetting with the paddle on | The 90 s limit counts across resets |
+| `loop()` stalls for 20 s (`WATCHDOG_S`) | The watchdog resets the board. A held stop is still released by the timer meanwhile |
+| Paddle reads off right after a stop, then on again | Plugs look swapped: interlock disabled until restart, fast white blink |
 
 ### Fail-safe guarantees
 
@@ -141,12 +170,19 @@ What the firmware does in this mode:
   keeps it closed while GPIO5 is undriven, so the Micra behaves as stock.
 - **Paddle on starts brewing** whenever the firmware is running, or the board is
   off or resetting. The only time it doesn't is an automatic stop being held,
-  and that hold ends as soon as the paddle reads off. A hung ESP32 is reset by
-  the watchdog within `WATCHDOG_S`.
+  and that hold ends once the paddle has read off for 0.3 s. The release runs
+  from a timer, independently of `loop()`, so a stalled Bluetooth call cannot
+  delay it; a hung `loop()` is reset by the watchdog within `WATCHDOG_S`.
+  After an automatic stop, leave the paddle off for at least a third of a
+  second before turning it on again.
+- **An automatic stop opens K1 first**, before any Bluetooth traffic or
+  logging, so a failed link cannot delay it.
 - **No remote start.** The ESP32 can only interrupt the paddle line. It cannot
   make the machine brew.
 
-These cases are covered by host tests with stub libraries, not on hardware.
+These cases are covered by host tests (`tests/interlock/run.sh`: the real
+sketch and library against stub Arduino and Bluetooth headers, 26 scripted
+scenarios), not on hardware.
 
 Flow rate, the scale sanity checks and over-the-air updates are described
 in [`examples/shotStopper/README.md`](../../examples/shotStopper/README.md).
@@ -186,16 +222,32 @@ headers and PS1).
 2. **Paddle line: measured.** On the CN9 cable the control board pulls the
    paddle line up to 5 V DC through about 10 k (5.0 V open, 2.52 V across
    10 k, no AC), so about 0.5 mA flows with the paddle on. The machine does not
-   brew at 2.52 V. No change to K1, U1, R10 or R12 was needed.
-3. **Clearance.** PS1 is about 10 mm tall (bottom right). The V3.1 case is open
-   on top, so this should be fine; check anyway.
-4. **First power-up on the bench.** With only USB connected: the LED lights;
-   GPIO5 high makes K1 open (measure the resistance between J3 pin 4 and J4
-   pin 4). Paddle sensing needs 5 V on J7: with a 5 V supply there, J4 pin 4
-   must read between 0 and +5 V relative to pin 1 (never negative, never above
-   5.5 V), and shorting J3 pin 4 to pin 1 pulls GPIO8 low. A negative reading
-   means a header is in backwards: do not connect it to the machine. Measure across C9 as
-   well: expect about 4.6–5.5 V from PS1.
+   brew at 2.52 V.
+3. **Clearance and screws.** PS1 is about 10 mm and the headers 12.6 mm tall;
+   the V3.1 case is open on top. At the mounting hole between the headers
+   (H2), machine-side copper starts 3.6 mm from the hole centre: use the V3.1
+   pan-head screw **without a washer** (or a nylon screw). A metal washer or
+   hex standoff there could bridge the paddle line to common, which the
+   machine reads as "paddle on".
+4. **First power-up on the bench, before the board goes near the machine.**
+   - USB only: the LED lights; GPIO5 high makes K1 open (measure the
+     resistance between J3 pin 4 and J4 pin 4: a few ohms closed, open when
+     high).
+   - Then 5 V from a bench supply on J7 (red to +), no USB, with the CN9 cable
+     plugged into J4 and its other end free. Measure at that free plug, yellow
+     (+) to black: it must be **positive, about 3 to 4.5 V**. Negative means J4
+     is fitted backwards: do not connect it.
+   - Put 10 k from a second 5 V to the yellow wire (grounds joined at the
+     black wire) to imitate the control board: yellow must then read 5.0 V
+     with J3 open, and near 0 V with J3 pin 4 shorted to pin 1. GPIO8 goes low
+     with that short. Across C9 expect about 4.4 to 5.4 V.
+5. **In the machine, first time.** Plug J7 with the machine switched off (PS1
+   is not rated for hot-plugging). Check CN4 still reads close to 5 V with the
+   board running. If the status LED blinks white fast after the first
+   automatic stop, the J3 and J4 plugs are swapped.
+
+PCBWay order form values and assembly notes are in
+[ORDER_NOTES.md](ORDER_NOTES.md) (copied into `fab/` with the files to upload).
 
 Work inside the Micra only with it unplugged. Mains is present in the chassis.
 
