@@ -44,6 +44,12 @@ sketch.
 On an Apple Silicon Mac, the ESP32-C3 compiler for this core is an Intel
 binary: install Rosetta once (`softwareupdate --install-rosetta`).
 
+PlatformIO's `espressif32@6.10.0` builds against Arduino-ESP32 core 2.0.17.
+The seller's shotStopper manual calls for core 3.3.3 in the Arduino IDE. The
+sketch compiles against both (the watchdog set-up is the only core-specific
+code), but only the 2.0.17 build has been compiled here and neither has run on
+the Micra Interlock board yet.
+
 The Arduino IDE works too: install this library and ArduinoBLE, open the
 sketch, and select an ESP32-C3 board with "USB CDC On Boot" enabled (or the
 Arduino Nano ESP32 for V2.1).
