@@ -6,10 +6,11 @@ import design as D
 
 THT = {"J3", "J4", "J7", "PS1"}
 NOTES = {
-    "J3": ("Same 4-pin latching header as ShotStopper V3.1 (mates the Micra paddle plug); pin 1 = square pad; "
+    "J3": ("TE AMPMODU MOD II header (mates the Micra paddle plug); pin 1 = square pad; "
            "latch wall on the side marked with the thick silkscreen bar"),
-    "J4": "As J3 (mates the CN9 cable); latch wall on the thick silkscreen bar",
-    "J7": "Same 2-pin latching header as ShotStopper V3.1 (5 V from CN4); latch wall on the thick silkscreen bar (board edge side), or + and - swap",
+    "J4": "As J3 (mates the CN9 cable, housing TE 280359); latch wall on the thick silkscreen bar",
+    "J7": ("TE AMPMODU MOD II header (mates housing TE 280358, 5 V from CN4); latch wall on the thick "
+           "silkscreen bar (board edge side), or + and - swap"),
     "PS1": "Through-hole SIP-4, 5 V in / 5 V out",
     "K1": "Normally-CLOSED type; do not substitute a normally-open relay",
     "D2": "LCSC C409780 (as ShotStopper V3.1); cathode mark (pin 2 corner) at the silkscreen dot",

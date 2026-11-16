@@ -161,20 +161,23 @@ solder-mask colour, lead-free HASL or ENIG. Minimum track 0.15 mm (the USB-C
 signals only; 0.25 mm elsewhere), minimum gap 0.2 mm, smallest drill 0.3 mm
 (vias), all inside PCBWay's standard capability.
 
-Assembly: top side only, SMD plus one through-hole part (PS1). The three
-headers (J3, J4, J7) are not in the parts list: they are desoldered from the
-V3.1 board and soldered in by hand (see below).
+Assembly: top side only, SMD plus four through-hole parts (the J3, J4, J7
+headers and PS1).
 
 ## Before you order
 
-1. **Headers: reuse the three from V3.1.** The part could not be identified
-   (black, upright, three walls with a tall latch wall and the opposite side
-   open; 4-pin body 12.4 x 5 mm, 2-pin 7.5 x 5 mm; not Molex SL 70543 and not
-   Molex Mini-SPOX 22-03), so J3, J4 and J7 are left out of the parts list and
-   moved over from the V3.1 board by hand. The latch wall goes on the side
-   with the thick silkscreen bar: with the USB connector up, on the right for
-   J3 and J4 (as on V3.1) and toward the board edge for J7, which is turned
-   90 degrees. A reversed J7 swaps + and -: red goes to the pin marked +.
+1. **Headers.** J3 and J4 are TE AMPMODU MOD II 280371-1 (4-pin) and J7 is
+   280370-1 (2-pin): 2.54 mm, partially shrouded, with a latch window. The
+   V3.1 seller's cable plugs are the matching MOD II housings (280359 4-pin,
+   280358 2-pin), and the listed header bodies (12.7 x 5 mm, 7.7 x 5 mm) match
+   those measured on V3.1. Per AMP drawing C-280370 the body is 5.0 mm wide
+   and 12.6 mm tall, with the pin row 2.2 mm from one face and 2.8 mm from the
+   other; the 5.8 mm outlines on the board cover either way round, and J7
+   clears R10/R12 and the board edge by at least 0.4 mm in both cases. The
+   latch wall goes on the side with the thick silkscreen bar: with the USB
+   connector up, on the right for J3 and J4 (as on V3.1) and toward the board
+   edge for J7, which is turned 90 degrees. A reversed J7 swaps + and -: red
+   goes to the pin marked +.
 2. **Paddle line: measured.** On the CN9 cable the control board pulls the
    paddle line up to 5 V DC through about 10 k (5.0 V open, 2.52 V across
    10 k, no AC), so about 0.5 mA flows with the paddle on. The machine does not

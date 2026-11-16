@@ -16,16 +16,19 @@ Item,Designator,Qty,Manufacturer,Mfg Part #,Description / Value,Package/Footprin
 15,"R3,R4,R5",3,Yageo,RC0603FR-07499RL,499,R_0603_1608Metric,SMD,
 16,"R6,R7",2,Yageo,RC0603FR-075K1L,5.1k,R_0603_1608Metric,SMD,
 17,R8,1,Yageo,RC0603FR-071ML,1M - USB shield to GND,R_0603_1608Metric,SMD,
-18,K1,1,Littelfuse,CPC1117NTR,CPC1117N - OptoMOS relay 1-Form-B (normally closed) 60V 120mA,SOP-4_3.8x4.1mm_P2.54mm,SMD,Normally-CLOSED type; do not substitute a normally-open relay
-19,U1,1,Everlight,EL357N(C)(TA)-G,"EL357N - Optocoupler, paddle sense",SO-4_4.4x3.6mm_P2.54mm,SMD,
-20,PS1,1,Mornsun,B0505S-1WR3,B0505S-1WR3 - Isolated DC-DC 5V->5V 1W SIP-4,Converter_DCDC_Murata_MEE1SxxxxSC_THT,Thru-hole,"Through-hole SIP-4, 5 V in / 5 V out"
-21,D6,1,Diodes Inc,B0520WS-7-F,B0520WS - Schottky 20 V 0.5 A: J7 5 V into PS1,D_SOD-323,SMD,
-22,D7,1,onsemi,MMSZ5234BT1G,6.2V - Zener 6.2 V 500 mW: isolated rail clamp,D_SOD-123,SMD,
-23,D4,1,Diodes Inc,1N4148WS-7-F,1N4148WS - Signal diode,D_SOD-323,SMD,
-24,R1,1,Yageo,RC0603FR-07390RL,390 - K1 LED current,R_0603_1608Metric,SMD,
-25,R10,1,Yageo,RC0603FR-071KL,1k - Paddle sense current,R_0603_1608Metric,SMD,
-26,R11,1,Yageo,RC1206FR-07220RL,220 - DC-DC minimum load (0.25 W),R_1206_3216Metric,SMD,
-27,R12,1,Yageo,RC0603FR-07680RL,680 - U1 LED leakage shunt,R_0603_1608Metric,SMD,
-28,R13,1,Yageo,RC0603FR-0747KL,47k - Paddle sense pull-up,R_0603_1608Metric,SMD,
-29,C8,1,Samsung,CL21A475KAQNNNE,4.7u - DC-DC input,C_0805_2012Metric,SMD,
-30,C9,1,Samsung,CL21A106KAYNNNE,10u - DC-DC output,C_0805_2012Metric,SMD,
+18,J3,1,TE Connectivity,280371-1,Buttons - 1x4 2.54 mm latching header: paddle plug,Header_1x04_Latching,Thru-hole,TE AMPMODU MOD II header (mates the Micra paddle plug); pin 1 = square pad; latch wall on the side marked with the thick silkscreen bar
+19,J4,1,TE Connectivity,280371-1,Brain - 1x4 2.54 mm latching header: cable to CN9,Header_1x04_Latching,Thru-hole,"As J3 (mates the CN9 cable, housing TE 280359); latch wall on the thick silkscreen bar"
+20,J7,1,TE Connectivity,280370-1,"PWR - 1x2 2.54 mm latching header: 5 V from CN4 (1 = GND, 2 = +5 V)",Header_1x02_Latching,Thru-hole,"TE AMPMODU MOD II header (mates housing TE 280358, 5 V from CN4); latch wall on the thick silkscreen bar (board edge side), or + and - swap"
+21,K1,1,Littelfuse,CPC1117NTR,CPC1117N - OptoMOS relay 1-Form-B (normally closed) 60V 120mA,SOP-4_3.8x4.1mm_P2.54mm,SMD,Normally-CLOSED type; do not substitute a normally-open relay
+22,U1,1,Everlight,EL357N(C)(TA)-G,"EL357N - Optocoupler, paddle sense",SO-4_4.4x3.6mm_P2.54mm,SMD,
+23,PS1,1,Mornsun,B0505S-1WR3,B0505S-1WR3 - Isolated DC-DC 5V->5V 1W SIP-4,Converter_DCDC_Murata_MEE1SxxxxSC_THT,Thru-hole,"Through-hole SIP-4, 5 V in / 5 V out"
+24,D6,1,Diodes Inc,B0520WS-7-F,B0520WS - Schottky 20 V 0.5 A: J7 5 V into PS1,D_SOD-323,SMD,
+25,D7,1,onsemi,MMSZ5234BT1G,6.2V - Zener 6.2 V 500 mW: isolated rail clamp,D_SOD-123,SMD,
+26,D4,1,Diodes Inc,1N4148WS-7-F,1N4148WS - Signal diode,D_SOD-323,SMD,
+27,R1,1,Yageo,RC0603FR-07390RL,390 - K1 LED current,R_0603_1608Metric,SMD,
+28,R10,1,Yageo,RC0603FR-071KL,1k - Paddle sense current,R_0603_1608Metric,SMD,
+29,R11,1,Yageo,RC1206FR-07220RL,220 - DC-DC minimum load (0.25 W),R_1206_3216Metric,SMD,
+30,R12,1,Yageo,RC0603FR-07680RL,680 - U1 LED leakage shunt,R_0603_1608Metric,SMD,
+31,R13,1,Yageo,RC0603FR-0747KL,47k - Paddle sense pull-up,R_0603_1608Metric,SMD,
+32,C8,1,Samsung,CL21A475KAQNNNE,4.7u - DC-DC input,C_0805_2012Metric,SMD,
+33,C9,1,Samsung,CL21A106KAYNNNE,10u - DC-DC output,C_0805_2012Metric,SMD,

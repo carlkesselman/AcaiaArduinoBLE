@@ -92,11 +92,14 @@ C0603 = "Capacitor_SMD:C_0603_1608Metric"
 C0805 = "Capacitor_SMD:C_0805_2012Metric"
 HDR4 = "custom:Header_1x04_Latching"
 HDR2 = "custom:Header_1x02_Latching"
-# Header part not identified. Measured on V3.1: 4-pin body 12.4 x 5 mm, 2-pin 7.5 x 5 mm,
-# black, three walls (tall latch wall, open opposite). NOT Molex SL 70543 (10.67 / 5.33 mm
-# long, 7.6 mm wide per drawing SDA-70543). Lengths fit a 2.5 mm family (2.5 x N + 2.4).
-LATCH4_MPN = "REUSE FROM V3.1 (4-pin)"
-LATCH2_MPN = "REUSE FROM V3.1 (2-pin)"
+# Headers: TE AMPMODU MOD II, 2.54 mm, partially shrouded with a detent (latch) window.
+# The V3.1 seller's cable plugs are the MOD II housings 280358 (2-pos) and 280359
+# (4-pos); these are the mating headers. Listed body: 12.7 x 5 mm and 7.7 x 5 mm,
+# which matches the headers measured on V3.1 (12.4 x 5 and 7.5 x 5 mm).
+# AMP drawing C-280370: D max 12.7 / 7.7 mm, 5.0 mm wide, 12.6 mm tall, 0.63 mm square
+# pins, pin row 2.2 mm from one face. -1 = tin plated.
+LATCH4_MPN = "280371-1"
+LATCH2_MPN = "280370-1"
 
 
 def v31(x, y, rot):
@@ -136,9 +139,9 @@ PARTS = {
     "R7": ("5.1k", R0603, "RC0603FR-075K1L", "Yageo", "USB CC pull-down", v31(86.868, 86.741, 90)),
     "R8": ("1M", R0603, "RC0603FR-071ML", "Yageo", "USB shield to GND", v31(81.534, 83.185, 90)),
     # ---- connectors ----
-    "J3": ("Buttons", HDR4, LATCH4_MPN, "", "1x4 2.54 mm latching header: paddle plug", J3_PIN1 + (0,)),
-    "J4": ("Brain", HDR4, LATCH4_MPN, "", "1x4 2.54 mm latching header: cable to CN9", J4_PIN1 + (0,)),
-    "J7": ("PWR", HDR2, LATCH2_MPN, "", "1x2 2.54 mm latching header: 5 V from CN4 (1 = GND, 2 = +5 V)",
+    "J3": ("Buttons", HDR4, LATCH4_MPN, "TE Connectivity", "1x4 2.54 mm latching header: paddle plug", J3_PIN1 + (0,)),
+    "J4": ("Brain", HDR4, LATCH4_MPN, "TE Connectivity", "1x4 2.54 mm latching header: cable to CN9", J4_PIN1 + (0,)),
+    "J7": ("PWR", HDR2, LATCH2_MPN, "TE Connectivity", "1x2 2.54 mm latching header: 5 V from CN4 (1 = GND, 2 = +5 V)",
            PWR_PIN1 + (PWR_ROT,)),
     # ---- interlock section ----
     "K1": ("CPC1117N", "Package_SO:SOP-4_3.8x4.1mm_P2.54mm", "CPC1117NTR", "Littelfuse",
@@ -174,8 +177,7 @@ PARTS = {
     "C8": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC input", (34.7, 39.4, 0)),
     "C9": ("10u", C0805, "CL21A106KAYNNNE", "Samsung", "DC-DC output", (43.72, 27.15, 90)),
 }
-# Headers are moved over by hand from the V3.1 board (part not identified).
-NOT_ASSEMBLED = {"J3", "J4", "J7"}
+NOT_ASSEMBLED = set()
 
 # --- Nets ---------------------------------------------------------------------------
 USB_GND = [("USB1", p) for p in ("A1", "A12", "B1", "B12")]
