@@ -41,6 +41,11 @@ start.
 
 ## How it works
 
+Full schematic: [schematic.svg](schematic.svg) (drawn by `schematic.py`; the
+netlist itself is in `design.py`).
+
+![schematic](schematic.png)
+
 ```
  J3 pin 4 (paddle) ── PADDLE ───[ K1 normally-closed ]─── BRAIN ── J4 pin 4 (to CN9)
                         │
