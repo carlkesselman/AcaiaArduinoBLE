@@ -13,6 +13,7 @@ $KPY build_board.py build 2>/dev/null
 $PY route.py build | grep -v "^ok "
 grep -q '"failed": \[\]' build/routes.json || { echo "routing failed"; exit 1; }
 $KPY finish_board.py build $PCB 2>&1 | grep saved
+python3 set_rules.py ${PCB%.kicad_pcb}.kicad_pro
 
 $KCLI pcb drc --severity-error --exit-code-violations -o build/drc.txt $PCB > /dev/null \
   && echo "DRC: no errors" || { echo "DRC errors, see build/drc.txt"; exit 1; }

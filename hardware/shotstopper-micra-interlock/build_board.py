@@ -3,7 +3,7 @@
 Run with KiCad's Python:
   /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 build_board.py OUTDIR
 """
-import json, math, os, sys
+import json, os, sys
 import pcbnew
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import design as D
@@ -21,30 +21,21 @@ board = pcbnew.BOARD()
 ds = board.GetDesignSettings()
 ds.SetCopperLayerCount(2)
 
-# ---- outline: TL, TR, BR rounded, BL square --------------------------------------
-W, H, R = D.BOARD_W, D.BOARD_H, D.CORNER_R
-
-
+# ---- outline (from design.outline()) ------------------------------------------------
 def seg(a, b):
     s = pcbnew.PCB_SHAPE(board, pcbnew.SHAPE_T_SEGMENT)
     s.SetStart(V(*a)); s.SetEnd(V(*b)); s.SetLayer(pcbnew.Edge_Cuts); s.SetWidth(MM(0.1))
     board.Add(s)
 
 
-def arc(c, start, mid, end):
+def arc(start, mid, end):
     s = pcbnew.PCB_SHAPE(board, pcbnew.SHAPE_T_ARC)
     s.SetArcGeometry(V(*start), V(*mid), V(*end)); s.SetLayer(pcbnew.Edge_Cuts); s.SetWidth(MM(0.1))
     board.Add(s)
 
 
-k = R * (1 - math.sqrt(0.5))
-seg((R, 0), (W - R, 0))
-arc(None, (W - R, 0), (W - k, k), (W, R))
-seg((W, R), (W, H - R))
-arc(None, (W, H - R), (W - k, H - k), (W - R, H))
-seg((W - R, H), (0, H))
-seg((0, H), (0, R))
-arc(None, (0, R), (k, k), (R, 0))
+for item in D.outline():
+    (seg if item[0] == "seg" else arc)(*item[1:])
 
 # ---- nets ----------------------------------------------------------------------------
 nets = {}
@@ -63,46 +54,72 @@ def load(fpid):
     return pcbnew.FootprintLoad(os.path.join(D.LIB, lib + ".pretty"), name)
 
 
-def ribbon_fp(ref, value):
-    fp = pcbnew.FOOTPRINT(board)
-    fp.SetFPID(pcbnew.LIB_ID("custom", "Ribbon_2x08_P2.54mm_V2.1"))
-    p1 = D.ribbon_pin_pos(ref, 1)
-    fp.SetPosition(V(*p1))
-    for pin in range(1, 17):
-        x, y = D.ribbon_pin_pos(ref, pin)
-        pad = pcbnew.PAD(fp)
-        pad.SetNumber(str(pin))
-        pad.SetAttribute(pcbnew.PAD_ATTRIB_PTH)
-        pad.SetShape(pcbnew.PAD_SHAPE_RECT if pin == 1 else pcbnew.PAD_SHAPE_CIRCLE)
-        pad.SetSize(V(1.7, 1.7))
-        pad.SetDrillSize(V(1.0, 1.0))
-        pad.SetLayerSet(pcbnew.PAD.PTHMask())
-        fp.Add(pad)
-        pad.SetPosition(V(x, y))
-    # mating IDC plug outline as on V2.1 (key notch toward the outside)
-    xo, xe = p1[0], p1[0] - 2.54
-    left, right = xe - 3.4, xo + 3.2
-    top, bot = p1[1] - 3.45, p1[1] + 7 * 2.54 + 3.3
-    for a, b in [((left, top), (right, top)), ((right, top), (right, bot)),
-                 ((right, bot), (left, bot)), ((left, bot), (left, top))]:
+def silk_rect(fp, x0, y0, x1, y1, layer=pcbnew.F_SilkS, w=0.15):
+    for a, b in [((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))]:
         s = pcbnew.PCB_SHAPE(fp, pcbnew.SHAPE_T_SEGMENT)
-        s.SetStart(V(*a)); s.SetEnd(V(*b)); s.SetLayer(pcbnew.F_SilkS); s.SetWidth(MM(0.15))
+        s.SetStart(V(*a)); s.SetEnd(V(*b)); s.SetLayer(layer); s.SetWidth(MM(w))
         fp.Add(s)
-    cy = (top + bot) / 2
-    s = pcbnew.PCB_SHAPE(fp, pcbnew.SHAPE_T_RECT)
-    s.SetStart(V(right - 0.6, cy - 2.5)); s.SetEnd(V(right, cy + 2.5))
-    s.SetLayer(pcbnew.F_SilkS); s.SetWidth(MM(0.15)); fp.Add(s)
+
+
+def header_fp(n, name):
+    """1xN 2.54 mm latching header, pins along +y from pin 1 at the origin.
+    Body outline: an assumed 6.4 mm wide shroud, 2.54 mm x N + 2.6 mm long."""
+    fp = pcbnew.FOOTPRINT(board)
+    fp.SetFPID(pcbnew.LIB_ID("custom", name))
+    for i in range(n):
+        pad = pcbnew.PAD(fp)
+        pad.SetNumber(str(i + 1))
+        pad.SetAttribute(pcbnew.PAD_ATTRIB_PTH)
+        pad.SetShape(pcbnew.PAD_SHAPE_RECT if i == 0 else pcbnew.PAD_SHAPE_CIRCLE)
+        pad.SetSize(V(1.7, 1.7)); pad.SetDrillSize(V(1.0, 1.0))
+        pad.SetLayerSet(pcbnew.PAD.PTHMask())
+        fp.Add(pad); pad.SetPosition(V(0, 2.54 * i))
+    half = (2.54 * (n - 1) + 2.6 + 2.54) / 2
+    cy = 2.54 * (n - 1) / 2
+    silk_rect(fp, -3.2, cy - half, 3.2, cy + half)
+    silk_rect(fp, -3.25, cy - half - 0.05, 3.25, cy + half + 0.05, pcbnew.F_CrtYd, 0.05)
+    m = pcbnew.PCB_SHAPE(fp, pcbnew.SHAPE_T_CIRCLE)        # pin 1 dot
+    m.SetCenter(V(-3.9, 0)); m.SetEnd(V(-3.6, 0)); m.SetLayer(pcbnew.F_SilkS); m.SetWidth(MM(0.3))
+    fp.Add(m)
     return fp
 
 
+def led_fp():
+    """MEIHUA MHP5050RGBDT land pattern as used on V3.1: 1.3 mm pads, 1.6 mm pitch,
+    rows 4.5 mm apart. Pins 1-3 (cathodes B, G, R) on the +y row, 4-6 (anodes) on -y."""
+    fp = pcbnew.FOOTPRINT(board)
+    fp.SetFPID(pcbnew.LIB_ID("custom", "LED_RGB_5050_MHP"))
+    pos = {1: (-1.6, 2.25), 2: (0, 2.25), 3: (1.6, 2.25), 4: (1.6, -2.25), 5: (0, -2.25), 6: (-1.6, -2.25)}
+    for num, (x, y) in pos.items():
+        pad = pcbnew.PAD(fp)
+        pad.SetNumber(str(num)); pad.SetAttribute(pcbnew.PAD_ATTRIB_SMD)
+        pad.SetShape(pcbnew.PAD_SHAPE_RECT); pad.SetSize(V(1.3, 1.3))
+        pad.SetLayerSet(pcbnew.PAD.SMDMask())
+        fp.Add(pad); pad.SetPosition(V(x, y))
+    silk_rect(fp, -2.6, -2.6, 2.6, 2.6, pcbnew.F_Fab, 0.1)
+    silk_rect(fp, -2.75, -3.15, 2.75, 3.15, pcbnew.F_CrtYd, 0.05)
+    m = pcbnew.PCB_SHAPE(fp, pcbnew.SHAPE_T_CIRCLE)        # pin 1 dot
+    m.SetCenter(V(-3.1, 3.3)); m.SetEnd(V(-2.9, 3.3)); m.SetLayer(pcbnew.F_SilkS); m.SetWidth(MM(0.3))
+    fp.Add(m)
+    return fp
+
+
+CUSTOM = {"custom:Header_1x04_Latching": lambda: header_fp(4, "Header_1x04_Latching"),
+          "custom:Header_1x02_Latching": lambda: header_fp(2, "Header_1x02_Latching"),
+          "custom:LED_RGB_5050_MHP": led_fp}
+
+
 for ref, (value, fpid, mpn, mfr, desc, place) in D.PARTS.items():
-    if fpid.startswith("custom:Ribbon"):
-        fp = ribbon_fp(ref, value)
-    else:
-        fp = load(fpid)
-        x, y, rot = place
-        fp.SetPosition(V(x, y))
-        fp.SetOrientationDegrees(rot)
+    fp = CUSTOM[fpid]() if fpid in CUSTOM else load(fpid)
+    for z in list(fp.Zones()):          # e.g. the module's generous antenna keep-out:
+        fp.Remove(z)                    # the board edge does that job here
+    if ref == "U3":                     # 0.2 mm thermal vias in the module's ground pad:
+        for pad in list(fp.Pads()):     # not needed at 0.3 W, and below PCBWay's 0.3 mm drill
+            if pad.GetDrillSize().x > 0:
+                fp.Remove(pad)
+    x, y, rot = place
+    fp.SetPosition(V(x, y))
+    fp.SetOrientationDegrees(rot)
     fp.SetReference(ref)
     fp.SetValue(value)
     fp.Value().SetVisible(False)

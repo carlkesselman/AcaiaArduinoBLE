@@ -1,14 +1,15 @@
 # shotStopper firmware
 
 Brew-by-weight for an espresso machine and a Bluetooth scale (Acaia Lunar,
-Pyxis, BooKoo, Felicita). Written for the Arduino Nano ESP32.
+Pyxis, BooKoo, Felicita). Runs on the ShotStopper boards: the ESP32-C3 ones
+(V3.1, Micra Interlock) and the Arduino Nano ESP32 (V2.1).
 
 ## Settings (top of `shotStopper.ino`)
 
 | Setting | Use |
 |---------|-----|
 | `MOMENTARY` | `true` for momentary brew buttons (GS3 AV, Silvia Pro); `false` for paddles (Linea Mini/Micra) |
-| `PADDLE_INTERLOCK` | `true` with the Micra Interlock board (`hardware/shotstopper-micra-interlock`): Linea Mini-style stop with the paddle left on. Needs `MOMENTARY false` |
+| `PADDLE_INTERLOCK` | `true` with the Micra Interlock board (`hardware/shotstopper-micra-interlock`): Linea Mini-style stop with the paddle left on, via GPIO5. Needs `MOMENTARY false` |
 | `AUTOTARE` | Tare when the shot starts |
 | `TIMER_ONLY` | Only start and stop the scale timer; no brew-by-weight |
 | `MAX_SHOT_DURATION_S` | Safety cap for a weighed shot (default 50 s) |
@@ -27,20 +28,25 @@ the VS Code extension), then from the repo root:
 
 | Command | Does |
 |---------|------|
-| `pio run` | Build the `micra` environment (Micra Interlock board) |
+| `pio run` | Build the `micra` environment (Micra Interlock board, ESP32-C3) |
 | `pio run -t upload` | Build and flash over USB |
 | `pio device monitor` | Serial log at 115200 |
 | `pio run -e micra_ota -t upload` | Flash the WiFi OTA build over USB (see OTA below) |
 | `pio run -e micra_wifi -t upload` | Flash the WiFi OTA build over WiFi |
-| `pio run -e v21` | Build for the original V2.1 board, using the settings in the sketch |
+| `pio run -e v31` | Build for the original V3.1 board (ESP32-C3), using the settings in the sketch |
+| `pio run -e v21` | Build for the original V2.1 board (Nano ESP32), using the settings in the sketch |
 
 The `micra` environments set `MOMENTARY`, `PADDLE_INTERLOCK` and
 `OTA_ENABLED` from `build_flags`. Those settings are wrapped in `#ifndef` in
 the sketch so this works, and the Arduino IDE uses the values written in the
 sketch.
 
+On an Apple Silicon Mac, the ESP32-C3 compiler for this core is an Intel
+binary: install Rosetta once (`softwareupdate --install-rosetta`).
+
 The Arduino IDE works too: install this library and ArduinoBLE, open the
-sketch, and select the Arduino Nano ESP32 board.
+sketch, and select an ESP32-C3 board with "USB CDC On Boot" enabled (or the
+Arduino Nano ESP32 for V2.1).
 
 ## Bluetooth values
 
@@ -102,5 +108,6 @@ the first 5 minutes after boot, or for 10 minutes after `1` is written to
 flashed, the paddle works by hand, and the board restarts with the interlock
 closed.
 
-The Nano ESP32's default partition scheme has the two 3 MB app slots OTA
-needs. The OTA build uses about 0.9 MB, the build without OTA about 0.5 MB.
+OTA needs two app slots. The ESP32-C3 builds use the `min_spiffs` partition
+scheme (two 1.9 MB slots in the 4 MB flash); the Nano ESP32's default scheme
+has two 3 MB slots.

@@ -31,11 +31,10 @@ ys = np.arange(NY) * RES
 X, Y = np.meshgrid(xs, ys)
 
 # ---- board interior: distance to outline ----------------------------------------
-W, H, R = D.BOARD_W, D.BOARD_H, D.CORNER_R
-d_edge = np.minimum.reduce([X, W - X, Y, H - Y])
-for cx, cy, sx, sy in ((R, R, -1, -1), (W - R, R, 1, -1), (W - R, H - R, 1, 1)):
-    corner = ((X - cx) * sx > 0) & ((Y - cy) * sy > 0)
-    d_edge = np.where(corner, R - np.hypot(X - cx, Y - cy), d_edge)
+_img = Image.new("1", (NX, NY), 0)
+ImageDraw.Draw(_img).polygon([(x / RES, y / RES) for x, y in D.outline_polygon()], fill=1, outline=0)
+inside = np.array(_img, bool)
+d_edge = np.where(inside, ndimage.distance_transform_edt(inside) * RES, -1.0)
 
 # ---- copper ownership maps (-1 free, -2 keep-out) ---------------------------------
 copper = {L: np.full((NY, NX), -1, np.int32) for L in LAYERS}
@@ -223,17 +222,43 @@ def net_masks(n):
 
 
 # ---- routing order --------------------------------------------------------------------
-ORDER = (["RIB8_P", "RIB12_P", "RIB8_B", "RIB12_B", "PADDLE", "BRAIN",
-          "GND", "VIN", "+3V3", "SENSE", "STOP", "K1_A", "COMMON"]
-         + [f"RIB{k}" for k in (16, 15, 14, 13, 11, 10, 9, 7, 5, 4, 3, 2, 1)]
-         + ["U2_K", "U2_A", "ISO5V"])
+ORDER = ["USB_DP", "USB_DN", "VUSB", "CC1", "CC2", "EN", "GND", "+3V3", "SHIELD", "LEDK_B", "LEDK_G", "LEDK_R",
+         "LED_B", "LED_G", "LED_R", "BOOT", "STOP", "K1_A", "SENSE",
+         "PADDLE", "BRAIN", "KEY2", "KEY3", "COMMON", "U1_K", "U1_A", "ISO5V",
+         "VIN"]
 ORDER = [n for n in ORDER if n in D.NETS] + [n for n in D.NETS if n not in ORDER]
 if len(sys.argv) > 2:
     ORDER = sys.argv[2].split(",") + [n for n in ORDER if n not in sys.argv[2].split(",")]
 
+# GND pads under the bottom-layer pour only need a via down to it
+px0, py0, px1, py1 = D.GND_POUR
+pour = (X > px0 + 0.6) & (X < px1 - 0.6) & (Y > py0 + 0.6) & (Y < py1 - 0.6)
+
+
+def in_pour(pc):
+    x, y = pc[2]
+    return (set(pc[1]) == {"F"} and not pc[3].startswith("U3.")
+            and px0 + 1 < x < px1 - 1 and py0 + 1 < y < py1 - 1)
+
+
 failed = []
 for n in ORDER:
     pins = [pc for pc in pad_cells if pc[0] == n]
+    stitch = []   # [pc for pc in pins if n == "GND" and in_pour(pc)]: GND routed as a tree
+    stitch_ids = {pc[3] for pc in stitch}
+    pins = [pc for pc in pins if pc[3] not in stitch_ids]
+    for pc in stitch:
+        mine = net_masks(n)
+        if (ndimage.binary_dilation(mine["F"] & ~pc[1]["F"]) & pc[1]["F"]).any():
+            continue
+        tgt = {"B": pour & (copper["B"] == -1) & (dom["B"] == 1)}
+        path, ex = route(n, pc[1], tgt, pc[2])
+        if path is None:
+            print(f"FAIL {n} stitch {pc[3]} ({ex} expansions)", flush=True)
+            failed.append((n, pc[3]))
+        else:
+            emit(n, path)
+            print(f"ok   {n} stitch {pc[3]} ({ex} exp, {len(path)} cells)", flush=True)
     if len(pins) < 2:
         continue
     connected = [pins[0]]

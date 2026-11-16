@@ -4,19 +4,20 @@ from collections import OrderedDict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import design as D
 
-THT = {"J1", "J3", "J4", "J5", "PS1"}
+THT = {"J3", "J4", "J7", "PS1"}
 NOTES = {
-    "J1": ("One module, two pin rows: J1 = left row (pin 1 = D13), J2 = right row (pin 1 = D12). "
-           "USB-C toward the board edge marked USB. Solder the Nano's headers directly into "
-           "J1 and J2, seated flat; NO sockets"),
-    "J3": "Mount on TOP side",
+    "J3": ("Same 4-pin latching header as ShotStopper V3.1 (mates the Micra paddle plug); "
+           "pin 1 = square pad; orient the latch as on V3.1"),
+    "J4": "Same 4-pin latching header as ShotStopper V3.1 (mates the CN9 cable); pin 1 = square pad",
+    "J7": "Same 2-pin latching header as ShotStopper V3.1 power input",
     "PS1": "Through-hole SIP-4; Murata MEE1S0305SC is a pin-compatible alternative",
     "K1": "Normally-CLOSED type; do not substitute a normally-open relay",
+    "D2": "LCSC C409780 (as ShotStopper V3.1); pin 1 = cathode of blue",
 }
 
 groups = OrderedDict()
 for ref, (value, fp, mpn, mfr, desc, _) in D.PARTS.items():
-    if ref in D.NOT_ASSEMBLED or ref == D.NANO_SECOND_ROW:
+    if ref in D.NOT_ASSEMBLED:
         continue
     key = (mpn, value, fp)
     groups.setdefault(key, {"refs": [], "mfr": mfr, "desc": desc, "fp": fp})["refs"].append(ref)
@@ -29,6 +30,7 @@ with open(sys.argv[1], "w", newline="") as f:
         refs = gr["refs"]
         typ = "Thru-hole" if refs[0] in THT else "SMD"
         note = "; ".join(NOTES[r] for r in refs if r in NOTES)
-        w.writerow([i, ",".join(refs), len(refs), gr["mfr"], mpn, f"{value} - {gr['desc']}",
+        desc = f"{value} - {gr['desc']}" if len(refs) == 1 else value
+        w.writerow([i, ",".join(refs), len(refs), gr["mfr"], mpn, desc,
                     fp.split(":")[1], typ, note])
 print("BOM:", sys.argv[1])

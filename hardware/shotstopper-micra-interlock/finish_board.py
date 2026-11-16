@@ -40,10 +40,20 @@ for fp in board.GetFootprints():
             f.SetVisible(False)
 
 
-# J2 is the Nano's second pin row, not a part: keep it off the BOM and centroid
-for fp in board.GetFootprints():
-    if fp.GetReference() == D.NANO_SECOND_ROW:
-        fp.SetAttributes(fp.GetAttributes() | pcbnew.FP_EXCLUDE_FROM_BOM | pcbnew.FP_EXCLUDE_FROM_POS_FILES)
+# Ground pour on the bottom layer under the ESP32 section (logic side only)
+x0, y0, x1, y1 = D.GND_POUR
+zone = pcbnew.ZONE(board)
+zone.SetLayer(pcbnew.B_Cu)
+zone.SetNet(nets["GND"])
+ol = zone.Outline()
+ol.NewOutline()
+for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
+    ol.Append(MM(x), MM(y))
+zone.SetLocalClearance(MM(0.3))
+zone.SetMinThickness(MM(0.25))
+zone.SetPadConnection(pcbnew.ZONE_CONNECTION_THERMAL)
+board.Add(zone)
+pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 
 
 def text(s, x, y, size=0.9, layer=pcbnew.F_SilkS, angle=0, just=0):
@@ -60,29 +70,30 @@ def text(s, x, y, size=0.9, layer=pcbnew.F_SilkS, angle=0, just=0):
 
 F, B = pcbnew.F_SilkS, pcbnew.B_SilkS
 # ---- top ----
-text("J3 Buttons", 24.8, 0.9, 0.8)
-text("J4 Brain", 39.4, 0.9, 0.8)
-text("-", 30.2, 36.73, 1.0)
-text("+", 30.2, 39.27, 1.0)
-text("JP1", 27.6, 15.11, 0.8, F, 90)
-text("JP2", 36.65, 15.11, 0.8, F, 90)
-text("JP3", 32.15, 12.25, 0.8)
-text("JP4", 32.15, 18.1, 0.8)
-for jx in (29.0, 35.3):
-    text("8", jx, 12.6, 0.8); text("12", jx, 17.65, 0.8)
-text("K1", 24.5, 26.25, 0.8)
-text("U2", 24.3, 37.3, 0.8)
-text("PS1", 40.4, 27.6, 0.8)
-text("USB", 9.06, 1.2, 0.8)
-# ---- bottom (mirrored), in the free area between the Nano header rows ----
-lines = ["ShotStopper Micra Interlock v1.0",
-         "after ShotStopper V2.1 (MIT)",
-         "Paddle pin 8: JP1+JP2 to 8, JP4",
-         "Paddle pin 12: JP1+JP2 to 12, JP3",
-         "D5 HI = stop  D10 LO = paddle on",
+jx3, jy = D.J3_PIN1
+jx4 = D.J4_PIN1[0]
+text("J3 BUTTONS", jx3, 0.9, 0.8)
+text("J4 BRAIN", jx4, 0.9, 0.8)
+text("(paddle)", jx3, 2.2, 0.8)
+text("(to CN9)", jx4, 2.2, 0.8)
+for jx in (jx3, jx4):
+    text("COM", jx, jy - 3.45, 0.8)
+    text("PADDLE", jx, jy + 3 * 2.54 + 3.4, 0.8)
+px, py = D.PWR_PIN1
+text("-", px - 2.0, py, 1.0)
+text("+", px - 2.0, py + 2.54, 1.0)
+text("K1", 32.12, 26.0, 0.8)
+text("U1", 31.92, 37.4, 0.8)
+text("PS1", 47.0, 26.6, 0.8)
+text("BOOT", 24.64, 16.6, 0.8)
+text("RESET", 24.64, 40.2, 0.8)
+# ---- bottom (mirrored), between J3 and J4 ----
+lines = ["ShotStopper Micra Interlock v2.0",
+         "after ShotStopper V3.1 (MIT)",
+         "GPIO5 HI = stop  GPIO8 LO = paddle on",
          "Low-voltage paddle line only"]
 for k, line in enumerate(lines):
-    text(line, 4.0 + k * 1.45, 22.5, 0.8, B, 90)
+    text(line, 35.0 + k * 1.5, 12.8, 0.8, B, 90)
 
 pcbnew.SaveBoard(OUT_PCB, board)
 print("saved", OUT_PCB, "tracks", len(r["tracks"]), "vias", len(r["vias"]))

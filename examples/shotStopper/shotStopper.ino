@@ -115,6 +115,7 @@
   #define IN          8
   #define OUT         6
   #define REED_IN     7
+  #define STOP        5       // Micra Interlock board: HIGH opens the paddle line
 #else //todo: find nano esp32 identifier
   //LED's are defined by framework
   // Use the Dn names: they are right whether or not the core remaps pin

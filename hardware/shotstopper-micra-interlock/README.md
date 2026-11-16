@@ -1,7 +1,7 @@
 # ShotStopper Micra Interlock
 
-A replacement for the ShotStopper V2.1 board, designed to give a La Marzocco
-Linea Micra Linea Mini-style brew-by-weight:
+A replacement for the ShotStopper V3.1 board that gives a La Marzocco Linea
+Micra Linea Mini-style brew-by-weight:
 
 - Paddle **on**: the shot starts, and the scale tares and starts its timer.
 - Target weight reached: the shot **stops even though the paddle is still on**.
@@ -15,97 +15,85 @@ not run on hardware. Work through [Before you order](#before-you-order) first.
 
 ![top](renders/top.png)
 
-## Same as V2.1
+## Same as V3.1
 
-The outline, the four M3 mounting holes, the Arduino Nano ESP32 position, the
-two 2x8 ribbon headers (J3 "Buttons", J4 "Brain") and the 2-pin power header
-are all where they are on V2.1, so the board fits the V2.1 half case and the
-same place in the machine. The ribbon headers have the same pin 1 position
-and every pin except the paddle pin passes straight through, so the existing
-ShotStopper ribbon cables plug in the same way.
+- **Outline and mounting holes**, so it fits the V3.1 case and the same spot in
+  the machine.
+- **The ESP32-C3 section** at V3.1's pad positions: ESP32-C3-WROOM-02 module
+  (antenna over the cut-out), USB-C for power and flashing, BOOT and RESET
+  buttons, and the same RGB LED (MEIHUA MHP5050RGBDT) on the same pins (red
+  GPIO21, green GPIO20, blue GPIO10), so the indicator colours are unchanged.
+- **The connectors and cables.** J3 and J4 are 4-pin headers in the same holes
+  V3.1 uses for the Micra (the middle four of the 2x8 pattern's even row, ribbon
+  pins 6, 8, 10, 12). The install is the same unplug/plug:
+  - **J3 "Buttons"**: the Micra's own paddle plug.
+  - **J4 "Brain"**: the black/yellow cable to **CN9** on the control board.
+  - **J7 "PWR"**: the red/black cable from **CN4** (+5 V). J7 is 2.3 mm lower
+    than V3.1's power header.
 
-Changed from V2.1: the Nano is soldered directly into the board by its own
-headers instead of sitting in sockets. That puts its top about 8 mm lower,
-roughly 5–6 mm above the board instead of about 13 mm. It is still flashed
-over its own USB-C port, at the board edge marked USB, or over WiFi.
+  Pin 1 (square pad) is common, the black wire; pin 4 is the paddle line.
+  Pins 2 and 3 (CN9 keys the Micra doesn't use) pass straight through.
 
-Removed from V2.1: the spade terminals, the reed-switch header, and the Q1
-optocoupler circuit. D9 and D11 are no longer connected.
+Removed from V3.1: the Q1 optocoupler ("induce" and "detect"), the SB1–SB5
+jumpers, the spade terminals and the reed-switch header. There is no remote
+start.
 
 ## How it works
 
 ```
- J3 paddle pin ──JP1── PADDLE ───[ K1 normally-closed ]─── BRAIN ──JP2── J4 paddle pin
-                         │                                             (to control board)
-                         └──|<── D1 ── U2 LED ── R3 ── ISO 5V ┐
-                                      (R6 across LED)          PS1 isolated DC-DC
- J3/J4 pin 6 (COMMON) ─────────────────────────────── ISO 0V ┘   3.3 V → 5 V
-                                                                     (R4 min load)
- Nano D5  ── R1 ── K1 LED            HIGH = K1 open = machine sees paddle off
-          └─ R2 10k to GND           keeps K1 closed during boot / reset
- Nano D10 ── U2 transistor to GND    LOW = paddle on  (R7 47k pull-up)
+ J3 pin 4 (paddle) ── PADDLE ───[ K1 normally-closed ]─── BRAIN ── J4 pin 4 (to CN9)
+                        │
+                        └──|<── D4 ── U1 LED ── R10 ── ISO 5V ┐
+                                     (R12 across LED)          PS1 isolated DC-DC
+ J3/J4 pin 1 (COMMON) ────────────────────────────── ISO 0V ┘   3.3 V → 5 V
+                                                                    (R11 min load)
+ GPIO5 ── R1 ── K1 LED            HIGH = K1 open = machine sees paddle off
+       └─ R9 10k to GND           keeps K1 closed during boot / reset
+ GPIO8 ── U1 transistor to GND    LOW = paddle on  (R13 47k pull-up)
 ```
 
 - **K1** (CPC1117N) is a normally-closed solid-state switch in series with the
-  paddle line. Driving D5 high opens it, so the control board sees the paddle
+  paddle line. Driving GPIO5 high opens it, so the control board sees the paddle
   as off and stops the shot. With no drive, it is closed.
-- **U2** senses the paddle independently of K1. A small isolated 5 V supply
-  (PS1) pushes about 1.7 mA through U2's LED and D1 into the paddle wire. When
-  the paddle shorts that wire to COMMON, U2 conducts and pulls D10 low. This
+- **U1** senses the paddle independently of K1. A small isolated 5 V supply
+  (PS1) pushes about 1.7 mA through U1's LED and D4 into the paddle wire. When
+  the paddle shorts that wire to COMMON, U1 conducts and pulls GPIO8 low. This
   works with K1 open or closed, so the firmware always knows where the paddle is.
-- **D1** stops the control board's own pull-up from feeding back into the sense
-  circuit. **R6** (680 Ω, smaller than R3) soaks up the leakage when the
+- **D4** stops the control board's own pull-up from feeding back into the sense
+  circuit. **R12** (680 Ω, smaller than R10) soaks up the leakage when the
   control board's pull-up is about 3.3 V, so a floating line doesn't read as
   "paddle on".
-- **R4** (240 Ω, 1206) draws 21 mA so that PS1 has its 10 % minimum load. With
+- **R11** (240 Ω, 1206) draws 21 mA so that PS1 has its 10 % minimum load. With
   less, its output is unspecified and can rise well above 5 V.
-- The logic side (Nano) and the machine side (ribbon) share no copper. They
-  connect only through K1, U2 and PS1. The minimum copper gap between the two
-  sides is 0.7 mm. That is **functional isolation for a low-voltage paddle
-  line, not mains-rated isolation.**
+- The ESP32 side and the machine side share no copper. They connect only
+  through K1, U1 and PS1. The minimum copper gap between the two sides is
+  0.8 mm (between PS1's own pins). That is **functional isolation for a
+  low-voltage paddle line, not mains-rated isolation.**
+- Power: 5 V from CN4 goes straight to the 3.3 V regulator (U2). USB 5 V comes in
+  through D1, so the machine's 5 V never back-feeds a computer.
 
-D10 has the same meaning as V2.1's "In", so the sensing is compatible.
-V2.1's parallel "Out" (D11) is not on this board. The old latching mode
-(`MOMENTARY false`, `PADDLE_INTERLOCK false`) still runs, but it can no longer
-keep a shot going after the paddle is turned off.
-
-## Setting the jumpers (one time, before installing)
-
-V2.1 carried the paddle signal on ribbon pin **8** or pin **12**, depending on
-the machine (its SB1–SB5 jumpers). Find out which pin yours uses, either from
-your V2.1 board (which of SB1/SB2 is bridged) or with a meter. The ShotStopper
-V3.1 schematic puts the Micra on pin 12 and the Linea Mini on pin 8. Then bridge
-these with a blob of solder:
-
-| Paddle on | JP1 (paddle side) | JP2 (brain side) | Also bridge |
-|-----------|-------------------|------------------|-------------|
-| pin 8     | centre to **8**   | centre to **8**  | JP4 (pin 12 straight through) |
-| pin 12    | centre to **12**  | centre to **12** | JP3 (pin 8 straight through) |
-
-The "8" and "12" marks are printed at the ends of JP1 and JP2. All other
-ribbon pins pass straight through, and pin 6 is COMMON, as on V2.1.
+GPIO8 is V3.1's "IN" pin. V3.1's "OUT" (GPIO6, remote start) is not connected.
 
 ## Firmware
 
-In `examples/shotStopper/shotStopper.ino` set:
-
-```c
-#define MOMENTARY false
-#define PADDLE_INTERLOCK true
-```
+Build and flash with PlatformIO from the repo root: `pio run -t upload` (the
+`micra` environment sets `MOMENTARY false` and `PADDLE_INTERLOCK true` for the
+ESP32-C3). In the Arduino IDE, set those two in
+`examples/shotStopper/shotStopper.ino` and pick an ESP32-C3 board with
+"USB CDC On Boot" enabled.
 
 What the firmware does in this mode:
 
 | Event | Result |
 |-------|--------|
 | Paddle on | Machine brews; the shot is tracked: tare, reset and start the timer |
-| Predicted target weight, or `MAX_SHOT_DURATION_S` | D5 high: K1 opens and the shot stops |
+| Predicted target weight, or `MAX_SHOT_DURATION_S` | GPIO5 high: K1 opens and the shot stops |
 | Paddle still on after the stop | K1 stays open; no new shot |
-| Paddle off (50 ms debounce, `PADDLE_DEBOUNCE_MS`) | D5 low: K1 closes, so the next paddle-on always brews |
+| Paddle off (50 ms debounce, `PADDLE_DEBOUNCE_MS`) | GPIO5 low: K1 closes, so the next paddle-on always brews |
 | Paddle off before the target | Shot stops; K1 never opens |
-| Scale lost during a weighed shot | D5 high: the shot stops (`STOP_ON_SCALE_LOSS`; set it `false` to leave the shot to the paddle) |
+| Scale lost during a weighed shot | GPIO5 high: the shot stops (`STOP_ON_SCALE_LOSS`; set it `false` to leave the shot to the paddle) |
 | Scale not connected when the paddle goes on | K1 stays closed; the paddle works by hand |
-| Paddle on for `INTERLOCK_MAX_BREW_S` (90 s), with or without a scale | D5 high: the brew stops until the paddle is off |
+| Paddle on for `INTERLOCK_MAX_BREW_S` (90 s), with or without a scale | GPIO5 high: the brew stops until the paddle is off |
 | Reconnect, or reset, partway through a shot | The shot keeps running on the paddle and isn't re-tared |
 | Crash or watchdog reset during a held stop | The stop stays held until the paddle is off, so a finished shot isn't restarted |
 | `loop()` stalls for 20 s (`WATCHDOG_S`) | The watchdog resets the board, and K1 closes |
@@ -114,8 +102,8 @@ What the firmware does in this mode:
 
 - **Paddle off always stops brewing.** This is enforced by hardware: K1 is in
   series, so an open paddle opens the line whatever the ESP32 does.
-- **Board unpowered, unplugged, or held in reset.** K1 is normally closed, and R2
-  keeps it closed while D5 is undriven, so the Micra behaves as stock.
+- **Board unpowered, unplugged, or held in reset.** K1 is normally closed, and R9
+  keeps it closed while GPIO5 is undriven, so the Micra behaves as stock.
 - **Paddle on starts brewing** whenever the firmware is running, or the board is
   off or resetting. The only time it doesn't is an automatic stop being held,
   and that hold ends as soon as the paddle reads off. A hung ESP32 is reset by
@@ -138,34 +126,33 @@ Everything is in `fab/`:
 | `bom.csv` | Assembly BOM (manufacturer part numbers) |
 | `centroid.csv` | Pick-and-place / centroid file (mm, top side) |
 
-PCB options: 2 layers, 44.3 × 41.3 mm, 1.6 mm FR-4, 1 oz copper, any
-solder-mask colour, lead-free HASL or ENIG. Minimum track and gap are
-0.25 mm and 0.2 mm, and the smallest drill is 0.3 mm (vias), all inside
-PCBWay's standard capability.
+PCB options: 2 layers, 51.9 × 41.3 mm, 1.6 mm FR-4, 1 oz copper, any
+solder-mask colour, lead-free HASL or ENIG. Minimum track 0.15 mm (the USB-C
+signals only; 0.25 mm elsewhere), minimum gap 0.2 mm, smallest drill 0.3 mm
+(vias), all inside PCBWay's standard capability.
 
-Assembly: top side only, SMD and through-hole. The Arduino Nano ESP32 *with
-headers* (Arduino ABX00092) is on the BOM as J1: PCBWay solders its two pin
-rows straight into the J1 and J2 holes, with no sockets, USB-C toward the
-edge marked USB. J2 is the Nano's second row, not a separate part, so it is
-not on the BOM or in the centroid file. JP1–JP4 are bare pads with no part
-to place.
+Assembly: top side only, SMD plus three through-hole parts (J3, J4, J7 headers
+and PS1). The headers are listed as "SAME AS V3.1" until their part number is
+confirmed (see below).
 
 ## Before you order
 
-1. **Paddle line voltage and current.** With the machine on, measure DC volts
-   between the paddle ribbon wire and pin 6 (COMMON), with the paddle off; expect
-   3.3–5 V. Then measure the current with the paddle on; expect a few mA. K1 is
-   rated 60 V / 120 mA. The line must not be mains.
-2. **Which ribbon pin** carries the paddle (8 or 12). See the jumper table above.
-3. **PS1 pinout.** The footprint assumes the industry-standard SIP-4 (1 = Vin−,
-   2 = Vin+, 3 = Vout−, 4 = Vout+), which Mornsun B0305S-1WR3 and Murata MEE1S0305SC
-   both use. Check it against the current datasheet.
-4. **Clearance.** PS1 is about 10 mm tall and sits beside J4 (bottom right).
-   Check that it clears whatever is above the board in your machine.
-5. **First power-up on the bench.** With only USB connected, check that D5 high
-   makes K1 open: measure the resistance between J3 and J4 on the selected pin.
-   Then check that shorting the selected J3 pin to pin 6 pulls D10 low.
-   Measure across C2 as well: expect 5.0–5.5 V from PS1.
+1. **Header part.** J3, J4 and J7 must be the same latching headers as on V3.1,
+   so the Micra's paddle plug, the CN9 cable and the CN4 power cable click in.
+   Find the part number (markings on the header, or ask the V3.1 seller) and put
+   it in `design.py` (`LATCH_MPN`). Check its body size too: the outlines on the
+   board assume a 6.4 mm wide shroud. J7's assumed outline overlaps R10, R12 and
+   C8, so a large 2-pin shroud would need those moved.
+2. **Paddle line voltage and current.** On the CN9 cable (unplugged from V3.1,
+   still in CN9), with the machine on: DC volts from the yellow wire (+) to the
+   black wire, then mA with the meter across the two (the machine brews). Expect
+   3.3–5 V and a few mA. K1 is rated 60 V / 120 mA. The line must not be mains.
+3. **Clearance.** PS1 is about 10 mm tall (bottom right). The V3.1 case is open
+   on top, so this should be fine; check anyway.
+4. **First power-up on the bench.** With only USB connected: the LED lights;
+   GPIO5 high makes K1 open (measure the resistance between J3 pin 4 and J4
+   pin 4); shorting J3 pin 4 to pin 1 pulls GPIO8 low. Measure across C9 as
+   well: expect 5.0–5.5 V from PS1.
 
 Work inside the Micra only with it unplugged. Mains is present in the chassis.
 
@@ -180,11 +167,12 @@ logic/machine routing areas.
 
 The script runs `build_board.py` (KiCad Python: places the parts),
 `route.py` (a small two-layer router that keeps each net on its own side),
-`finish_board.py` (adds tracks and silkscreen), KiCad DRC, and the
+`finish_board.py` (adds tracks, the ground pour and silkscreen), `set_rules.py`
+(design rules), KiCad DRC, and the
 Gerber/drill/BOM/centroid exports. It needs KiCad 10. You can open
 `shotstopper-micra-interlock.kicad_pcb` in KiCad and edit it by hand, but a
 rerun of the script overwrites it.
 
 There is no schematic file. The netlist is in `design.py` (`NETS`).
 
-Based on ShotStopper V2.1 by Tate Mazer (MIT License).
+Based on ShotStopper V3.1 by Tate Mazer (MIT License).
