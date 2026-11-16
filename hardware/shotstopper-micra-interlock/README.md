@@ -28,8 +28,9 @@ not run on hardware. Work through [Before you order](#before-you-order) first.
   pins 6, 8, 10, 12). The install is the same unplug/plug:
   - **J3 "Buttons"**: the Micra's own paddle plug.
   - **J4 "Brain"**: the black/yellow cable to **CN9** on the control board.
-  - **J7 "PWR"**: the red/black cable from **CN4** (+5 V). J7 is 2.3 mm lower
-    than V3.1's power header.
+  - **J7 "PWR"**: the red/black cable from **CN4** (+5 V). J7 is turned 90°
+    compared with V3.1's power header: pins side by side, + on the left, latch
+    wall toward the board edge.
 
   Pin 1 (square pad) is common, the black wire; pin 4 is the paddle line.
   Pins 2 and 3 (CN9 keys the Micra doesn't use) pass straight through.
@@ -131,22 +132,24 @@ solder-mask colour, lead-free HASL or ENIG. Minimum track 0.15 mm (the USB-C
 signals only; 0.25 mm elsewhere), minimum gap 0.2 mm, smallest drill 0.3 mm
 (vias), all inside PCBWay's standard capability.
 
-Assembly: top side only, SMD plus three through-hole parts (J3, J4, J7 headers
-and PS1). The headers are listed as "SAME AS V3.1" until their part number is
-confirmed (see below).
+Assembly: top side only, SMD plus one through-hole part (PS1). The three
+headers (J3, J4, J7) are not in the parts list: they are desoldered from the
+V3.1 board and soldered in by hand (see below).
 
 ## Before you order
 
-1. **Header part.** J3, J4 and J7 must be the same latching headers as on V3.1,
-   so the Micra's paddle plug, the CN9 cable and the CN4 power cable click in.
-   Find the part number (markings on the header, or ask the V3.1 seller) and put
-   it in `design.py` (`LATCH_MPN`). Check its body size too: the outlines on the
-   board assume a 6.4 mm wide shroud. J7's assumed outline overlaps R10, R12 and
-   C8, so a large 2-pin shroud would need those moved.
-2. **Paddle line voltage and current.** On the CN9 cable (unplugged from V3.1,
-   still in CN9), with the machine on: DC volts from the yellow wire (+) to the
-   black wire, then mA with the meter across the two (the machine brews). Expect
-   3.3–5 V and a few mA. K1 is rated 60 V / 120 mA. The line must not be mains.
+1. **Headers: reuse the three from V3.1.** The part could not be identified
+   (black, upright, three walls with a tall latch wall and the opposite side
+   open; 4-pin body 12.4 x 5 mm, 2-pin 7.5 x 5 mm; not Molex SL 70543 and not
+   Molex Mini-SPOX 22-03), so J3, J4 and J7 are left out of the parts list and
+   moved over from the V3.1 board by hand. The latch wall goes on the side
+   with the thick silkscreen bar: with the USB connector up, on the right for
+   J3 and J4 (as on V3.1) and toward the board edge for J7, which is turned
+   90 degrees. A reversed J7 swaps + and -: red goes to the pin marked +.
+2. **Paddle line: measured.** On the CN9 cable the control board pulls the
+   paddle line up to 5 V DC through about 10 k (5.0 V open, 2.52 V across
+   10 k, no AC), so about 0.5 mA flows with the paddle on. The machine does not
+   brew at 2.52 V. No change to K1, U1, R10 or R12 was needed.
 3. **Clearance.** PS1 is about 10 mm tall (bottom right). The V3.1 case is open
    on top, so this should be fine; check anyway.
 4. **First power-up on the bench.** With only USB connected: the LED lights;

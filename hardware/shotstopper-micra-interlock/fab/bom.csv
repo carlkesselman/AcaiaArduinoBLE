@@ -16,16 +16,13 @@ Item,Designator,Qty,Manufacturer,Mfg Part #,Description / Value,Package/Footprin
 15,"R3,R4,R5",3,Yageo,RC0603FR-07499RL,499,R_0603_1608Metric,SMD,
 16,"R6,R7",2,Yageo,RC0603FR-075K1L,5.1k,R_0603_1608Metric,SMD,
 17,R8,1,Yageo,RC0603FR-071ML,1M - USB shield to GND,R_0603_1608Metric,SMD,
-18,J3,1,,SAME AS V3.1,Buttons - 1x4 2.54 mm latching header: paddle plug,Header_1x04_Latching,Thru-hole,Same 4-pin latching header as ShotStopper V3.1 (mates the Micra paddle plug); pin 1 = square pad; orient the latch as on V3.1
-19,J4,1,,SAME AS V3.1,Brain - 1x4 2.54 mm latching header: cable to CN9,Header_1x04_Latching,Thru-hole,Same 4-pin latching header as ShotStopper V3.1 (mates the CN9 cable); pin 1 = square pad
-20,J7,1,,SAME AS V3.1,"PWR - 1x2 2.54 mm latching header: 5 V from CN4 (1 = GND, 2 = +5 V)",Header_1x02_Latching,Thru-hole,Same 2-pin latching header as ShotStopper V3.1 power input
-21,K1,1,Littelfuse,CPC1117NTR,CPC1117N - OptoMOS relay 1-Form-B (normally closed) 60V 120mA,SOP-4_3.8x4.1mm_P2.54mm,SMD,Normally-CLOSED type; do not substitute a normally-open relay
-22,U1,1,Everlight,EL357N(C)(TA)-G,"EL357N - Optocoupler, paddle sense",SO-4_4.4x3.6mm_P2.54mm,SMD,
-23,PS1,1,Mornsun,B0305S-1WR3,B0305S-1WR3 - Isolated DC-DC 3.3V->5V 1W SIP-4,Converter_DCDC_Murata_MEE1SxxxxSC_THT,Thru-hole,Through-hole SIP-4; Murata MEE1S0305SC is a pin-compatible alternative
-24,D4,1,Diodes Inc,1N4148WS-7-F,1N4148WS - Signal diode,D_SOD-323,SMD,
-25,R1,1,Yageo,RC0603FR-07390RL,390 - K1 LED current,R_0603_1608Metric,SMD,
-26,R10,1,Yageo,RC0603FR-071KL,1k - Paddle sense current,R_0603_1608Metric,SMD,
-27,R11,1,Yageo,RC1206FR-07240RL,240 - DC-DC minimum load (0.25 W),R_1206_3216Metric,SMD,
-28,R12,1,Yageo,RC0603FR-07680RL,680 - U1 LED leakage shunt,R_0603_1608Metric,SMD,
-29,R13,1,Yageo,RC0603FR-0747KL,47k - Paddle sense pull-up,R_0603_1608Metric,SMD,
-30,"C8,C9",2,Samsung,CL21A475KAQNNNE,4.7u,C_0805_2012Metric,SMD,
+18,K1,1,Littelfuse,CPC1117NTR,CPC1117N - OptoMOS relay 1-Form-B (normally closed) 60V 120mA,SOP-4_3.8x4.1mm_P2.54mm,SMD,Normally-CLOSED type; do not substitute a normally-open relay
+19,U1,1,Everlight,EL357N(C)(TA)-G,"EL357N - Optocoupler, paddle sense",SO-4_4.4x3.6mm_P2.54mm,SMD,
+20,PS1,1,Mornsun,B0305S-1WR3,B0305S-1WR3 - Isolated DC-DC 3.3V->5V 1W SIP-4,Converter_DCDC_Murata_MEE1SxxxxSC_THT,Thru-hole,Through-hole SIP-4; Murata MEE1S0305SC is a pin-compatible alternative
+21,D4,1,Diodes Inc,1N4148WS-7-F,1N4148WS - Signal diode,D_SOD-323,SMD,
+22,R1,1,Yageo,RC0603FR-07390RL,390 - K1 LED current,R_0603_1608Metric,SMD,
+23,R10,1,Yageo,RC0603FR-071KL,1k - Paddle sense current,R_0603_1608Metric,SMD,
+24,R11,1,Yageo,RC1206FR-07240RL,240 - DC-DC minimum load (0.25 W),R_1206_3216Metric,SMD,
+25,R12,1,Yageo,RC0603FR-07680RL,680 - U1 LED leakage shunt,R_0603_1608Metric,SMD,
+26,R13,1,Yageo,RC0603FR-0747KL,47k - Paddle sense pull-up,R_0603_1608Metric,SMD,
+27,"C8,C9",2,Samsung,CL21A475KAQNNNE,4.7u,C_0805_2012Metric,SMD,

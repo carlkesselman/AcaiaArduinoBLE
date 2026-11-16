@@ -77,9 +77,11 @@ MOUNT_KEEPOUT_R = 3.0              # copper keep-out radius around the M3 holes
 # J3 "Buttons": the paddle's own plug.  J4 "Brain": the cable to CN9.
 J3_PIN1 = g(99.06, 86.487)
 J4_PIN1 = g(113.665, 86.487)
-# Power: 1x2, pin 1 = GND, pin 2 = +5 V from the Micra's CN4. V2.1's power header
-# spot, 2.3 mm lower than V3.1's, to make room for the sense circuit.
-PWR_PIN1 = (39.853, 36.728)
+# Power: 1x2, pin 1 = GND, pin 2 = +5 V from the Micra's CN4. Turned 90 degrees from
+# V3.1 (pins side by side, + on the left, latch wall toward the board edge) so the
+# 7.6 x 5 mm body stays inside the outline and clear of the sense circuit.
+PWR_PIN1 = (41.82, 37.9)
+PWR_ROT = 270
 
 # --- Parts ---------------------------------------------------------------------------
 # ref: (value, kicad footprint, MPN, manufacturer, description, (x, y, rot))
@@ -90,7 +92,11 @@ C0603 = "Capacitor_SMD:C_0603_1608Metric"
 C0805 = "Capacitor_SMD:C_0805_2012Metric"
 HDR4 = "custom:Header_1x04_Latching"
 HDR2 = "custom:Header_1x02_Latching"
-LATCH_MPN = "SAME AS V3.1"   # see README "Before you order"
+# Header part not identified. Measured on V3.1: 4-pin body 12.4 x 5 mm, 2-pin 7.5 x 5 mm,
+# black, three walls (tall latch wall, open opposite). NOT Molex SL 70543 (10.67 / 5.33 mm
+# long, 7.6 mm wide per drawing SDA-70543). Lengths fit a 2.5 mm family (2.5 x N + 2.4).
+LATCH4_MPN = "REUSE FROM V3.1 (4-pin)"
+LATCH2_MPN = "REUSE FROM V3.1 (2-pin)"
 
 
 def v31(x, y, rot):
@@ -130,10 +136,10 @@ PARTS = {
     "R7": ("5.1k", R0603, "RC0603FR-075K1L", "Yageo", "USB CC pull-down", v31(86.868, 86.741, 90)),
     "R8": ("1M", R0603, "RC0603FR-071ML", "Yageo", "USB shield to GND", v31(81.534, 83.185, 90)),
     # ---- connectors ----
-    "J3": ("Buttons", HDR4, LATCH_MPN, "", "1x4 2.54 mm latching header: paddle plug", J3_PIN1 + (0,)),
-    "J4": ("Brain", HDR4, LATCH_MPN, "", "1x4 2.54 mm latching header: cable to CN9", J4_PIN1 + (0,)),
-    "J7": ("PWR", HDR2, LATCH_MPN, "", "1x2 2.54 mm latching header: 5 V from CN4 (1 = GND, 2 = +5 V)",
-           PWR_PIN1 + (0,)),
+    "J3": ("Buttons", HDR4, LATCH4_MPN, "", "1x4 2.54 mm latching header: paddle plug", J3_PIN1 + (0,)),
+    "J4": ("Brain", HDR4, LATCH4_MPN, "", "1x4 2.54 mm latching header: cable to CN9", J4_PIN1 + (0,)),
+    "J7": ("PWR", HDR2, LATCH2_MPN, "", "1x2 2.54 mm latching header: 5 V from CN4 (1 = GND, 2 = +5 V)",
+           PWR_PIN1 + (PWR_ROT,)),
     # ---- interlock section ----
     "K1": ("CPC1117N", "Package_SO:SOP-4_3.8x4.1mm_P2.54mm", "CPC1117NTR", "Littelfuse",
            "OptoMOS relay 1-Form-B (normally closed) 60V 120mA", (32.12, 29.2, 0)),
@@ -152,10 +158,11 @@ PARTS = {
     "R11": ("240", R1206, "RC1206FR-07240RL", "Yageo", "DC-DC minimum load (0.25 W)", (43.62, 31.15, 90)),
     "R12": ("680", R0603, "RC0603FR-07680RL", "Yageo", "U1 LED leakage shunt", (38.22, 34.2, 0)),
     "R13": ("47k", R0603, "RC0603FR-0747KL", "Yageo", "Paddle sense pull-up", (21.6, 25.9, 0)),
-    "C8": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC input", (43.22, 38.0, 90)),
+    "C8": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC input", (35.2, 39.3, 0)),
     "C9": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC output", (43.72, 27.15, 90)),
 }
-NOT_ASSEMBLED = set()
+# Headers are moved over by hand from the V3.1 board (part not identified).
+NOT_ASSEMBLED = {"J3", "J4", "J7"}
 
 # --- Nets ---------------------------------------------------------------------------
 USB_GND = [("USB1", p) for p in ("A1", "A12", "B1", "B12")]

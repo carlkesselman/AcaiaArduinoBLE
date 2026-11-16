@@ -80,8 +80,7 @@ for jx in (jx3, jx4):
     text("COM", jx, jy - 3.45, 0.8)
     text("PADDLE", jx, jy + 3 * 2.54 + 3.4, 0.8)
 px, py = D.PWR_PIN1
-text("-", px - 2.0, py, 1.0)
-text("+", px - 2.0, py + 2.54, 1.0)
+text("+", px - 2.54 - 3.5, py - 0.5, 1.0)
 text("K1", 32.12, 26.0, 0.8)
 text("U1", 31.92, 37.4, 0.8)
 text("PS1", 47.0, 26.6, 0.8)

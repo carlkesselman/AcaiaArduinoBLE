@@ -63,7 +63,7 @@ def silk_rect(fp, x0, y0, x1, y1, layer=pcbnew.F_SilkS, w=0.15):
 
 def header_fp(n, name):
     """1xN 2.54 mm latching header, pins along +y from pin 1 at the origin.
-    Body outline: an assumed 6.4 mm wide shroud, 2.54 mm x N + 2.6 mm long."""
+    Body outline: 5.8 mm wide (measured about 5 mm on V3.1, plus margin), 2.54 mm x N + 2.6 mm long."""
     fp = pcbnew.FOOTPRINT(board)
     fp.SetFPID(pcbnew.LIB_ID("custom", name))
     for i in range(n):
@@ -76,10 +76,12 @@ def header_fp(n, name):
         fp.Add(pad); pad.SetPosition(V(0, 2.54 * i))
     half = (2.54 * (n - 1) + 2.6 + 2.54) / 2
     cy = 2.54 * (n - 1) / 2
-    silk_rect(fp, -3.2, cy - half, 3.2, cy + half)
-    silk_rect(fp, -3.25, cy - half - 0.05, 3.25, cy + half + 0.05, pcbnew.F_CrtYd, 0.05)
+    silk_rect(fp, -2.9, cy - half, 2.9, cy + half)
+    silk_rect(fp, -2.95, cy - half - 0.05, 2.95, cy + half + 0.05, pcbnew.F_CrtYd, 0.05)
+    # Latch (solid) wall is on the +x side on V3.1, for all three headers: thick bar.
+    silk_rect(fp, 2.5, cy - half, 2.9, cy + half, pcbnew.F_SilkS, 0.3)
     m = pcbnew.PCB_SHAPE(fp, pcbnew.SHAPE_T_CIRCLE)        # pin 1 dot
-    m.SetCenter(V(-3.9, 0)); m.SetEnd(V(-3.6, 0)); m.SetLayer(pcbnew.F_SilkS); m.SetWidth(MM(0.3))
+    m.SetCenter(V(-3.6, 0)); m.SetEnd(V(-3.3, 0)); m.SetLayer(pcbnew.F_SilkS); m.SetWidth(MM(0.3))
     fp.Add(m)
     return fp
 
