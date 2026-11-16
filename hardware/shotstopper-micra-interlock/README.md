@@ -71,10 +71,28 @@ start.
   0.8 mm (between PS1's own pins). That is **functional isolation for a
   low-voltage paddle line, not mains-rated isolation.**
 - Power: 5 V from CN4 comes in through D5 and USB 5 V through D1, so neither
-  source back-feeds the other and a reversed J7 does no damage. The shared
-  rail (about 4.6 V) feeds the 3.3 V regulator (U2) and PS1 (B0505S-1WR3, 5 V
-  in, 5 V out). PS1 is on this rail rather than on 3.3 V to keep its load, and
-  heat, off the small regulator.
+  source back-feeds the other and a reversed J7 does no damage. That shared
+  rail (about 4.6 V) feeds the 3.3 V regulator (U2).
+- PS1 (B0505S-1WR3, 5 V in, 5 V out) is fed from J7 only, through D6. **On USB
+  power alone the paddle sensing is off**, so the board can never drive the
+  control board's paddle input while the machine is off. PS1 is not on the
+  3.3 V rail, which keeps its load, and heat, off the small regulator.
+- **D7** (6.2 V zener) clamps the isolated rail in case PS1 ever runs unloaded.
+
+### What the machine's control board sees
+
+- Paddle off: the sense circuit is behind D4, which is reverse-biased by the
+  control board's own 5 V pull-up, so nothing flows into or out of the paddle
+  input. The isolated rail (4.6–5.5 V, 6.5 V at most with D7) minus D4's drop
+  stays at or below the control board's 5 V.
+- Paddle on: the sense current (about 3 mA) flows from PS1 through the paddle
+  switch and back to PS1 on this board. None of it flows in the CN9 cable.
+- K1 adds at most 16 Ω in series (8 mV at the measured 0.5 mA) when closed and
+  about 1 µA of leakage when open.
+- Board unpowered or J7 unplugged: PS1 is off, D4 blocks, K1 is closed. The
+  paddle line is as on a stock machine.
+- Extra load on CN4: PS1 draws roughly 60 mA from the machine's 5 V, on top of
+  the ESP32's draw that V3.1 already has.
 
 GPIO8 is V3.1's "IN" pin. V3.1's "OUT" (GPIO6, remote start) is not connected.
 
@@ -160,7 +178,10 @@ V3.1 board and soldered in by hand (see below).
    on top, so this should be fine; check anyway.
 4. **First power-up on the bench.** With only USB connected: the LED lights;
    GPIO5 high makes K1 open (measure the resistance between J3 pin 4 and J4
-   pin 4); shorting J3 pin 4 to pin 1 pulls GPIO8 low. Measure across C9 as
+   pin 4). Paddle sensing needs 5 V on J7: with a 5 V supply there, J4 pin 4
+   must read between 0 and +5 V relative to pin 1 (never negative, never above
+   5.5 V), and shorting J3 pin 4 to pin 1 pulls GPIO8 low. A negative reading
+   means a header is in backwards: do not connect it to the machine. Measure across C9 as
    well: expect about 4.6–5.5 V from PS1.
 
 Work inside the Micra only with it unplugged. Mains is present in the chassis.

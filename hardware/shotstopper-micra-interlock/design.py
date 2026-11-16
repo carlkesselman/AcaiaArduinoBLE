@@ -145,14 +145,21 @@ PARTS = {
            "OptoMOS relay 1-Form-B (normally closed) 60V 120mA", (32.12, 29.2, 0)),
     "U1": ("EL357N", "Package_SO:SO-4_4.4x3.6mm_P2.54mm", "EL357N(C)(TA)-G", "Everlight",
            "Optocoupler, paddle sense", (31.92, 34.6, 180)),
-    # PS1 runs from VIN (about 4.6 V after D1/D5), not from the 3.3 V rail, so its
-    # ~60 mA does not load (and heat) the SOT-23-5 regulator.
+    # PS1 runs from the machine's 5 V only (J7 through D6), never from USB: with the
+    # machine off there is then no sense voltage on the control board's input. It is
+    # not on the 3.3 V rail, so its ~60 mA does not heat the SOT-23-5 regulator.
     "PS1": ("B0505S-1WR3", "Converter_DCDC:Converter_DCDC_Murata_MEE1SxxxxSC_THT", "B0505S-1WR3", "Mornsun",
             "Isolated DC-DC 5V->5V 1W SIP-4", (50.02, 38.2, 180)),
     # D5: reverse-polarity protection for the hand-soldered J7, and stops USB 5 V
     # from back-feeding the machine's CN4 rail.
     "D5": ("PMEG6010CEH", "Diode_SMD:D_SOD-123F", "PMEG6010CEH,115", "Nexperia",
-           "Schottky 60 V 1 A: J7 5 V into VIN", (30.3, 39.6, 0)),
+           "Schottky 60 V 1 A: J7 5 V into VIN", (30.3, 39.85, 0)),
+    "D6": ("B0520WS", "Diode_SMD:D_SOD-323", "B0520WS-7-F", "Diodes Inc",
+           "Schottky 20 V 0.5 A: J7 5 V into PS1", (30.3, 37.75, 0)),
+    # D7 clamps the isolated rail if PS1 ever runs unloaded (R11 open), so the sense
+    # circuit can never put more than about 6.5 V behind R10 on the paddle line.
+    "D7": ("6.2V", "Diode_SMD:D_SOD-123", "MMSZ5234BT1G", "onsemi",
+           "Zener 6.2 V 500 mW: isolated rail clamp", (40.0, 22.5, 0)),
     "D4": ("1N4148WS", "Diode_SMD:D_SOD-323", "1N4148WS-7-F", "Diodes Inc", "Signal diode", (39.02, 32.45, 180)),
     "R1": ("390", R0603, "RC0603FR-07390RL", "Yageo", "K1 LED current", (26.87, 27.4, 90)),
     "R9": ("10k", R0603, "RC0603FR-0710KL", "Yageo", "K1 pull-down (closed in reset)", (22.6, 27.6, 0)),
@@ -179,10 +186,11 @@ NETS = {
                       ("SW1", "1"), ("SW2", "1"), ("C1", "2"), ("C2", "2"), ("C3", "2"), ("C4", "2"),
                       ("C5", "2"), ("C6", "2"), ("C7", "2"), ("R6", "2"), ("R7", "2"), ("R8", "2"),
                       ("J7", "1"), ("K1", "2"), ("U1", "3"), ("R9", "1"), ("PS1", "1"), ("C8", "2")],
-    "VIN_J": [("J7", "2"), ("D5", "2")],
+    "VIN_J": [("J7", "2"), ("D5", "2"), ("D6", "2")],
+    "VPS": [("D6", "1"), ("PS1", "2"), ("C8", "1")],
     "+3V3": [("U3", "1"), ("U2", "5"), ("C1", "1"), ("C2", "1"), ("C4", "1"), ("R2", "1"),
              ("D2", "1"), ("D2", "3"), ("D2", "5"), ("R13", "1")],
-    "VIN": [("D5", "1"), ("D1", "1"), ("U2", "1"), ("U2", "3"), ("C3", "1"), ("PS1", "2"), ("C8", "1")],
+    "VIN": [("D5", "1"), ("D1", "1"), ("U2", "1"), ("U2", "3"), ("C3", "1")],
     "VUSB": USB_VBUS + [("D1", "2"), ("D3", "4")],
     "USB_DP": [("USB1", "A6"), ("USB1", "B6"), ("D3", "3"), ("U3", "14")],   # GPIO19
     "USB_DN": [("USB1", "A7"), ("USB1", "B7"), ("D3", "2"), ("U3", "13")],   # GPIO18
@@ -201,8 +209,8 @@ NETS = {
     "K1_A": [("R1", "2"), ("K1", "1")],
     "SENSE": [("U3", "7"), ("R13", "2"), ("U1", "4")],                       # GPIO8: LOW = paddle on
     # ---- machine side (isolated, referenced to COMMON) ----
-    "ISO5V": [("PS1", "4"), ("R10", "2"), ("R11", "1"), ("C9", "1")],
-    "COMMON": [("PS1", "3"), ("R11", "2"), ("C9", "2"), ("J3", "1"), ("J4", "1")],
+    "ISO5V": [("PS1", "4"), ("R10", "2"), ("R11", "1"), ("C9", "1"), ("D7", "1")],
+    "COMMON": [("PS1", "3"), ("R11", "2"), ("C9", "2"), ("D7", "2"), ("J3", "1"), ("J4", "1")],
     "U1_A": [("R10", "1"), ("R12", "1"), ("U1", "1")],
     "U1_K": [("U1", "2"), ("R12", "2"), ("D4", "2")],
     "PADDLE": [("D4", "1"), ("K1", "4"), ("J3", "4")],
@@ -213,7 +221,7 @@ NETS = {
 MACHINE_NETS = {"ISO5V", "COMMON", "U1_A", "U1_K", "PADDLE", "BRAIN", "KEY2", "KEY3"}
 LOGIC_NETS = set(NETS) - MACHINE_NETS
 
-TRACK_W = {"VIN": 0.4, "VIN_J": 0.4, "VUSB": 0.3, "+3V3": 0.3, "GND": 0.3,
+TRACK_W = {"VIN": 0.4, "VIN_J": 0.4, "VPS": 0.3, "VUSB": 0.3, "+3V3": 0.3, "GND": 0.3,
            # USB-C signal pads are 0.5 mm apart
            "USB_DP": 0.15, "USB_DN": 0.15, "CC1": 0.15, "CC2": 0.15}
 DEFAULT_TRACK_W = 0.25
