@@ -107,6 +107,11 @@ for jx, pin4 in ((jx3, "WHT"), (jx4, "YEL")):
 px, py = D.PWR_PIN1                                         # J7: pin 1 (GND) right, pin 2 (+5 V) left
 text("+", px - 2.54, py - 1.75, 1.0)
 text("-", px, py - 1.75, 1.0)
+# The marks above end up under the header once it is fitted, and there is no
+# free top-side space around it: repeat them on the bottom, at the pins.
+text("+", px - 2.54, py - 1.9, 1.0, layer=pcbnew.B_SilkS)
+text("-", px, py - 1.9, 1.0, layer=pcbnew.B_SilkS)
+text("J7 5V IN", px - 1.27, py + 2.0, 0.8, layer=pcbnew.B_SilkS)
 text("LATCH", px - 1.27, py + 1.7, 0.8)
 
 

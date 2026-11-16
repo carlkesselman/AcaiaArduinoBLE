@@ -322,9 +322,10 @@ void setup() {
   }
   
   // initialize the GPIO hardware
-  // The interlock board has its own pull-up (R13); the internal one would only
-  // add load for the sense optocoupler.
-  pinMode(in, PADDLE_INTERLOCK ? INPUT : INPUT_PULLUP);
+  // The interlock board has its own pull-up (R13). The internal one is kept on
+  // as well, so the pin cannot float (and read "paddle on") if R13 is ever
+  // open; the sense optocoupler has ample margin for both.
+  pinMode(in, INPUT_PULLUP);
   digitalWrite(OUT, LOW);
   pinMode(OUT, OUTPUT);
   if(PADDLE_INTERLOCK){

@@ -98,7 +98,9 @@ netlist itself is in `design.py`).
 - Paddle off: the sense circuit is behind D4, which is reverse-biased by the
   control board's own 5 V pull-up, so nothing flows into or out of the paddle
   input. The isolated rail (4.6–5.5 V, 6.5 V at most with D7) minus D4's drop
-  stays at or below the control board's 5 V.
+  stays at or below the control board's 5 V in normal operation; at the top of
+  that range a few microamps can flow through R12 (under 30 mV on a 10 k
+  pull-up).
 - Paddle on: the sense current (about 1.4 mA) flows from PS1 through the paddle
   switch and back to PS1 on this board. None of it flows in the CN9 cable.
 - K1 adds at most 16 Ω in series (8 mV at the measured 0.5 mA) when closed and
@@ -117,7 +119,8 @@ Worked through for every part (open and short). What the machine can see:
 |---|---|
 | K1 fails open, or GPIO5 stuck high | Never brews until fixed or the board is bypassed. Nothing is damaged |
 | K1 fails shorted, K1 drive open | No automatic stop; the paddle still starts and stops |
-| U1, R10, R13 or D4 open | No paddle sensing: stock behaviour, no automatic stop |
+| U1, R10 or D4 open | No paddle sensing: stock behaviour, no automatic stop |
+| R13 open | None: the firmware also enables the ESP32's internal pull-up on GPIO8 |
 | U1's output shorted, GPIO8 stuck low | Firmware sees "paddle on" for ever, stops at 90 s and holds: never brews |
 | D4 shorted | Board powered: no effect. Board unpowered: input stays above 4.5 V (R12), no brew |
 | R11 open | Isolated rail rises to D7's 6.2-6.6 V; at most about 40 µA reaches the input, under 5.4 V |
@@ -235,7 +238,7 @@ headers and PS1).
      high).
    - Then 5 V from a bench supply on J7 (red to +), no USB, with the CN9 cable
      plugged into J4 and its other end free. Measure at that free plug, yellow
-     (+) to black: it must be **positive, about 3 to 4.5 V**. Negative means J4
+     (+) to black: it must be **positive, about 4 to 5.2 V**. Negative means J4
      is fitted backwards: do not connect it.
    - Put 10 k from a second 5 V to the yellow wire (grounds joined at the
      black wire) to imitate the control board: yellow must then read 5.0 V

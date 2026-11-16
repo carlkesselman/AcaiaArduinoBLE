@@ -159,7 +159,7 @@ PARTS = {
     "D5": ("PMEG6010CEH", "Diode_SMD:D_SOD-123F", "PMEG6010CEH,115", "Nexperia",
            "Schottky 60 V 1 A: J7 5 V into VIN", (24.6, 29.7, 0)),
     "D6": ("B0520WS", "Diode_SMD:D_SOD-323", "B0520WS-7-F", "Diodes Inc",
-           "Schottky 20 V 0.5 A: J7 5 V into PS1", (24.6, 31.2, 0)),
+           "Schottky 20 V 0.5 A: J7 5 V into PS1", (24.6, 31.6, 0)),
     # F1 limits what a fault on this board (shorted C3, C8 or PS1) can draw from the
     # machine's CN4 5 V supply. Normal draw is about 0.14 A.
     "F1": ("0.5A", "Fuse:Fuse_1206_3216Metric", "MF-NSMF050-2", "Bourns",
