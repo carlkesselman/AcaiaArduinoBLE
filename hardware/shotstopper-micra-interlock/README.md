@@ -32,7 +32,12 @@ not run on hardware. Work through [Before you order](#before-you-order) first.
     compared with V3.1's power header: pins side by side, + on the left, latch
     wall toward the board edge.
 
-  Pin 1 (square pad) is common, the black wire; pin 4 is the paddle line.
+  Pin 1 (square pad, marked BLK) is common, the black wire. Pin 4 is the paddle
+  line: the white wire on J3 (marked WHT) and the yellow wire on J4 (marked
+  YEL). This is the pin order of the V3.1 Micra kit, checked against V3.1's
+  drill file and photos of both sides of a V3.1 board: its 4-pin headers sit
+  in the row without the square pad, in holes 3 to 6 counted from the
+  square-pad end, with black at hole 3.
   Pins 2 and 3 (CN9 keys the Micra doesn't use) pass straight through.
 
 Removed from V3.1: the Q1 optocoupler ("induce" and "detect"), the SB1–SB5

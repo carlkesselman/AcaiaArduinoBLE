@@ -76,9 +76,11 @@ text("J3 BUTTONS", jx3, 0.9, 0.8)
 text("J4 BRAIN", jx4, 0.9, 0.8)
 text("(paddle)", jx3, 2.2, 0.8)
 text("(to CN9)", jx4, 2.2, 0.8)
-for jx in (jx3, jx4):
-    text("COM", jx, jy - 3.45, 0.8)
-    text("PADDLE", jx, jy + 3 * 2.54 + 3.4, 0.8)
+# Pin labels are the wire colours of the plugs, as fitted on V3.1: pin 1 black
+# (common) on both; pin 4 white on the paddle's plug, yellow on the CN9 cable.
+for jx, pin4 in ((jx3, "WHT"), (jx4, "YEL")):
+    text("BLK", jx, jy - 3.45, 0.8)
+    text(pin4, jx, jy + 3 * 2.54 + 3.4, 0.8)
 px, py = D.PWR_PIN1
 text("+", px - 2.54 - 3.5, py - 0.5, 1.0)
 text("K1", 32.12, 26.0, 0.8)
