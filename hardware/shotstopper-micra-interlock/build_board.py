@@ -80,18 +80,21 @@ def header_fp(n, name):
     silk_rect(fp, -2.95, cy - half - 0.05, 2.95, cy + half + 0.05, pcbnew.F_CrtYd, 0.05)
     # Latch (solid) wall is on the +x side on V3.1, for all three headers: thick bar.
     silk_rect(fp, 2.5, cy - half, 2.9, cy + half, pcbnew.F_SilkS, 0.3)
-    m = pcbnew.PCB_SHAPE(fp, pcbnew.SHAPE_T_CIRCLE)        # pin 1 dot
-    m.SetCenter(V(-3.6, 0)); m.SetEnd(V(-3.3, 0)); m.SetLayer(pcbnew.F_SilkS); m.SetWidth(MM(0.3))
-    fp.Add(m)
+    if n > 2:                                              # pin 1 dot (J7 is labelled "+" instead)
+        m = pcbnew.PCB_SHAPE(fp, pcbnew.SHAPE_T_CIRCLE)
+        m.SetCenter(V(-3.6, 0)); m.SetEnd(V(-3.3, 0)); m.SetLayer(pcbnew.F_SilkS); m.SetWidth(MM(0.3))
+        fp.Add(m)
     return fp
 
 
 def led_fp():
-    """MEIHUA MHP5050RGBDT land pattern as used on V3.1: 1.3 mm pads, 1.6 mm pitch,
-    rows 4.5 mm apart. Pins 1-3 (cathodes B, G, R) on the +y row, 4-6 (anodes) on -y."""
+    """MEIHUA MHP5050RGBDT on V3.1's land pattern and in V3.1's orientation: 1.3 mm pads,
+    1.6 mm pitch, rows 4.5 mm apart. Datasheet pins: anodes 1 (B), 3 (G), 5 (R) on one
+    side, cathodes 2 (B), 4 (G), 6 (R) on the other, cathode mark at the pin 2 corner.
+    V3.1 has the anode side on +y (3V3) and blue at +x."""
     fp = pcbnew.FOOTPRINT(board)
     fp.SetFPID(pcbnew.LIB_ID("custom", "LED_RGB_5050_MHP"))
-    pos = {1: (-1.6, 2.25), 2: (0, 2.25), 3: (1.6, 2.25), 4: (1.6, -2.25), 5: (0, -2.25), 6: (-1.6, -2.25)}
+    pos = {1: (1.6, 2.25), 3: (0, 2.25), 5: (-1.6, 2.25), 2: (1.6, -2.25), 4: (0, -2.25), 6: (-1.6, -2.25)}
     for num, (x, y) in pos.items():
         pad = pcbnew.PAD(fp)
         pad.SetNumber(str(num)); pad.SetAttribute(pcbnew.PAD_ATTRIB_SMD)
@@ -100,8 +103,8 @@ def led_fp():
         fp.Add(pad); pad.SetPosition(V(x, y))
     silk_rect(fp, -2.6, -2.6, 2.6, 2.6, pcbnew.F_Fab, 0.1)
     silk_rect(fp, -2.75, -3.15, 2.75, 3.15, pcbnew.F_CrtYd, 0.05)
-    m = pcbnew.PCB_SHAPE(fp, pcbnew.SHAPE_T_CIRCLE)        # pin 1 dot
-    m.SetCenter(V(-3.1, 3.3)); m.SetEnd(V(-2.9, 3.3)); m.SetLayer(pcbnew.F_SilkS); m.SetWidth(MM(0.3))
+    m = pcbnew.PCB_SHAPE(fp, pcbnew.SHAPE_T_CIRCLE)        # cathode mark (pin 2 corner)
+    m.SetCenter(V(3.1, -3.3)); m.SetEnd(V(2.9, -3.3)); m.SetLayer(pcbnew.F_SilkS); m.SetWidth(MM(0.3))
     fp.Add(m)
     return fp
 

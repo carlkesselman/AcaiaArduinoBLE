@@ -69,7 +69,7 @@ def outline_polygon(step=0.1):
 
 # --- mechanical: identical to V3.1 so the board drops into the same case ---------
 MOUNTING_HOLES = [g(70.485, 92.202), g(107.315, 68.072)]
-MOUNT_KEEPOUT_R = 3.0              # copper keep-out radius around the M3 holes
+MOUNT_KEEPOUT_R = 3.3              # copper keep-out radius around the M3 holes
 
 # --- Machine connectors: one 1x4 latching header each, in the middle four holes of
 # the even row of V3.1's 2x8 pattern, where V3.1 fits them for the Micra. Header
@@ -114,7 +114,7 @@ PARTS = {
     "D1": ("PMEG6010CEH", "Diode_SMD:D_SOD-123F", "PMEG6010CEH,115", "Nexperia",
            "Schottky 60 V 1 A: USB 5 V into VIN", (25.781, 5.969, 90)),
     "D2": ("RGB", "custom:LED_RGB_5050_MHP", "MHP5050RGBDT", "MEIHUA",
-           "RGB LED 5050, common anode (LCSC C409780, as V3.1)", v31(70.612, 84.963, 0)),
+           "RGB LED 5050 (LCSC C409780, as V3.1); anodes 1/3/5, cathodes 2 B, 4 G, 6 R", v31(70.612, 84.963, 0)),
     "D3": ("PRTR5V0U2X", "Package_TO_SOT_SMD:SOT-143", "PRTR5V0U2X,215", "Nexperia",
            "USB ESD protection", v31(82.423, 86.741, 90)),
     "SW1": ("BOOT", "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A", "TS-1187A-B-A-B", "XKB",
@@ -145,21 +145,27 @@ PARTS = {
            "OptoMOS relay 1-Form-B (normally closed) 60V 120mA", (32.12, 29.2, 0)),
     "U1": ("EL357N", "Package_SO:SO-4_4.4x3.6mm_P2.54mm", "EL357N(C)(TA)-G", "Everlight",
            "Optocoupler, paddle sense", (31.92, 34.6, 180)),
-    "PS1": ("B0305S-1WR3", "Converter_DCDC:Converter_DCDC_Murata_MEE1SxxxxSC_THT", "B0305S-1WR3", "Mornsun",
-            "Isolated DC-DC 3.3V->5V 1W SIP-4", (50.02, 38.2, 180)),
+    # PS1 runs from VIN (about 4.6 V after D1/D5), not from the 3.3 V rail, so its
+    # ~60 mA does not load (and heat) the SOT-23-5 regulator.
+    "PS1": ("B0505S-1WR3", "Converter_DCDC:Converter_DCDC_Murata_MEE1SxxxxSC_THT", "B0505S-1WR3", "Mornsun",
+            "Isolated DC-DC 5V->5V 1W SIP-4", (50.02, 38.2, 180)),
+    # D5: reverse-polarity protection for the hand-soldered J7, and stops USB 5 V
+    # from back-feeding the machine's CN4 rail.
+    "D5": ("PMEG6010CEH", "Diode_SMD:D_SOD-123F", "PMEG6010CEH,115", "Nexperia",
+           "Schottky 60 V 1 A: J7 5 V into VIN", (30.3, 39.6, 0)),
     "D4": ("1N4148WS", "Diode_SMD:D_SOD-323", "1N4148WS-7-F", "Diodes Inc", "Signal diode", (39.02, 32.45, 180)),
     "R1": ("390", R0603, "RC0603FR-07390RL", "Yageo", "K1 LED current", (26.87, 27.4, 90)),
     "R9": ("10k", R0603, "RC0603FR-0710KL", "Yageo", "K1 pull-down (closed in reset)", (22.6, 27.6, 0)),
     # R10/R12: about 1.7 mA through U1's LED with the paddle on. R12 < R10 keeps the
     # LED off when PS1 leaks into a 3.3 V paddle line with the paddle off.
     "R10": ("1k", R0603, "RC0603FR-071KL", "Yageo", "Paddle sense current", (41.22, 34.2, 0)),
-    # R11: 21 mA, PS1's 10 % minimum load (unloaded, its output is unspecified
-    # and can rise well above 5 V). About 105 mW, hence 1206.
-    "R11": ("240", R1206, "RC1206FR-07240RL", "Yageo", "DC-DC minimum load (0.25 W)", (43.62, 31.15, 90)),
+    # R11: about 21 mA at 4.6 V, PS1's 10 % minimum load (unloaded, its output is
+    # unspecified and can rise well above 5 V). About 0.1 W, hence 1206.
+    "R11": ("220", R1206, "RC1206FR-07220RL", "Yageo", "DC-DC minimum load (0.25 W)", (43.62, 31.15, 90)),
     "R12": ("680", R0603, "RC0603FR-07680RL", "Yageo", "U1 LED leakage shunt", (38.22, 34.2, 0)),
     "R13": ("47k", R0603, "RC0603FR-0747KL", "Yageo", "Paddle sense pull-up", (21.6, 25.9, 0)),
-    "C8": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC input", (35.2, 39.3, 0)),
-    "C9": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC output", (43.72, 27.15, 90)),
+    "C8": ("4.7u", C0805, "CL21A475KAQNNNE", "Samsung", "DC-DC input", (34.7, 39.4, 0)),
+    "C9": ("10u", C0805, "CL21A106KAYNNNE", "Samsung", "DC-DC output", (43.72, 27.15, 90)),
 }
 # Headers are moved over by hand from the V3.1 board (part not identified).
 NOT_ASSEMBLED = {"J3", "J4", "J7"}
@@ -173,9 +179,10 @@ NETS = {
                       ("SW1", "1"), ("SW2", "1"), ("C1", "2"), ("C2", "2"), ("C3", "2"), ("C4", "2"),
                       ("C5", "2"), ("C6", "2"), ("C7", "2"), ("R6", "2"), ("R7", "2"), ("R8", "2"),
                       ("J7", "1"), ("K1", "2"), ("U1", "3"), ("R9", "1"), ("PS1", "1"), ("C8", "2")],
+    "VIN_J": [("J7", "2"), ("D5", "2")],
     "+3V3": [("U3", "1"), ("U2", "5"), ("C1", "1"), ("C2", "1"), ("C4", "1"), ("R2", "1"),
-             ("D2", "4"), ("D2", "5"), ("D2", "6"), ("R13", "1"), ("PS1", "2"), ("C8", "1")],
-    "VIN": [("J7", "2"), ("D1", "1"), ("U2", "1"), ("U2", "3"), ("C3", "1")],
+             ("D2", "1"), ("D2", "3"), ("D2", "5"), ("R13", "1")],
+    "VIN": [("D5", "1"), ("D1", "1"), ("U2", "1"), ("U2", "3"), ("C3", "1"), ("PS1", "2"), ("C8", "1")],
     "VUSB": USB_VBUS + [("D1", "2"), ("D3", "4")],
     "USB_DP": [("USB1", "A6"), ("USB1", "B6"), ("D3", "3"), ("U3", "14")],   # GPIO19
     "USB_DN": [("USB1", "A7"), ("USB1", "B7"), ("D3", "2"), ("U3", "13")],   # GPIO18
@@ -187,9 +194,9 @@ NETS = {
     "LED_B": [("U3", "10"), ("R3", "1")],                                    # GPIO10
     "LED_G": [("U3", "11"), ("R4", "1")],                                    # GPIO20
     "LED_R": [("U3", "12"), ("R5", "1")],                                    # GPIO21
-    "LEDK_B": [("R3", "2"), ("D2", "1")],
-    "LEDK_G": [("R4", "2"), ("D2", "2")],
-    "LEDK_R": [("R5", "2"), ("D2", "3")],
+    "LEDK_B": [("R3", "2"), ("D2", "2")],
+    "LEDK_G": [("R4", "2"), ("D2", "4")],
+    "LEDK_R": [("R5", "2"), ("D2", "6")],
     "STOP": [("U3", "4"), ("R1", "1"), ("R9", "2")],                         # GPIO5: HIGH opens K1
     "K1_A": [("R1", "2"), ("K1", "1")],
     "SENSE": [("U3", "7"), ("R13", "2"), ("U1", "4")],                       # GPIO8: LOW = paddle on
@@ -206,7 +213,7 @@ NETS = {
 MACHINE_NETS = {"ISO5V", "COMMON", "U1_A", "U1_K", "PADDLE", "BRAIN", "KEY2", "KEY3"}
 LOGIC_NETS = set(NETS) - MACHINE_NETS
 
-TRACK_W = {"VIN": 0.4, "VUSB": 0.3, "+3V3": 0.3, "GND": 0.3,
+TRACK_W = {"VIN": 0.4, "VIN_J": 0.4, "VUSB": 0.3, "+3V3": 0.3, "GND": 0.3,
            # USB-C signal pads are 0.5 mm apart
            "USB_DP": 0.15, "USB_DN": 0.15, "CC1": 0.15, "CC2": 0.15}
 DEFAULT_TRACK_W = 0.25

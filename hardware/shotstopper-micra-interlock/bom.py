@@ -10,9 +10,9 @@ NOTES = {
            "latch wall on the side marked with the thick silkscreen bar"),
     "J4": "As J3 (mates the CN9 cable); latch wall on the thick silkscreen bar",
     "J7": "Same 2-pin latching header as ShotStopper V3.1 (5 V from CN4); latch wall on the thick silkscreen bar (board edge side), or + and - swap",
-    "PS1": "Through-hole SIP-4; Murata MEE1S0305SC is a pin-compatible alternative",
+    "PS1": "Through-hole SIP-4, 5 V in / 5 V out",
     "K1": "Normally-CLOSED type; do not substitute a normally-open relay",
-    "D2": "LCSC C409780 (as ShotStopper V3.1); pin 1 = cathode of blue",
+    "D2": "LCSC C409780 (as ShotStopper V3.1); cathode mark (pin 2 corner) at the silkscreen dot",
 }
 
 groups = OrderedDict()

@@ -46,7 +46,7 @@ start.
                         │
                         └──|<── D4 ── U1 LED ── R10 ── ISO 5V ┐
                                      (R12 across LED)          PS1 isolated DC-DC
- J3/J4 pin 1 (COMMON) ────────────────────────────── ISO 0V ┘   3.3 V → 5 V
+ J3/J4 pin 1 (COMMON) ────────────────────────────── ISO 0V ┘   5 V → 5 V
                                                                     (R11 min load)
  GPIO5 ── R1 ── K1 LED            HIGH = K1 open = machine sees paddle off
        └─ R9 10k to GND           keeps K1 closed during boot / reset
@@ -57,23 +57,29 @@ start.
   paddle line. Driving GPIO5 high opens it, so the control board sees the paddle
   as off and stops the shot. With no drive, it is closed.
 - **U1** senses the paddle independently of K1. A small isolated 5 V supply
-  (PS1) pushes about 1.7 mA through U1's LED and D4 into the paddle wire. When
+  (PS1) pushes about 1.5 mA through U1's LED and D4 into the paddle wire. When
   the paddle shorts that wire to COMMON, U1 conducts and pulls GPIO8 low. This
   works with K1 open or closed, so the firmware always knows where the paddle is.
 - **D4** stops the control board's own pull-up from feeding back into the sense
   circuit. **R12** (680 Ω, smaller than R10) soaks up the leakage when the
   control board's pull-up is about 3.3 V, so a floating line doesn't read as
   "paddle on".
-- **R11** (240 Ω, 1206) draws 21 mA so that PS1 has its 10 % minimum load. With
+- **R11** (220 Ω, 1206) draws about 21 mA so that PS1 has its 10 % minimum load. With
   less, its output is unspecified and can rise well above 5 V.
 - The ESP32 side and the machine side share no copper. They connect only
   through K1, U1 and PS1. The minimum copper gap between the two sides is
   0.8 mm (between PS1's own pins). That is **functional isolation for a
   low-voltage paddle line, not mains-rated isolation.**
-- Power: 5 V from CN4 goes straight to the 3.3 V regulator (U2). USB 5 V comes in
-  through D1, so the machine's 5 V never back-feeds a computer.
+- Power: 5 V from CN4 comes in through D5 and USB 5 V through D1, so neither
+  source back-feeds the other and a reversed J7 does no damage. The shared
+  rail (about 4.6 V) feeds the 3.3 V regulator (U2) and PS1 (B0505S-1WR3, 5 V
+  in, 5 V out). PS1 is on this rail rather than on 3.3 V to keep its load, and
+  heat, off the small regulator.
 
 GPIO8 is V3.1's "IN" pin. V3.1's "OUT" (GPIO6, remote start) is not connected.
+
+GPIO8 is also an ESP32-C3 boot-mode pin: to enter the bootloader with the BOOT
+button, have the paddle **off**. Normal start-up is not affected.
 
 ## Firmware
 
@@ -96,7 +102,7 @@ What the firmware does in this mode:
 | Scale not connected when the paddle goes on | K1 stays closed; the paddle works by hand |
 | Paddle on for `INTERLOCK_MAX_BREW_S` (90 s), with or without a scale | GPIO5 high: the brew stops until the paddle is off |
 | Reconnect, or reset, partway through a shot | The shot keeps running on the paddle and isn't re-tared |
-| Crash or watchdog reset during a held stop | The stop stays held until the paddle is off, so a finished shot isn't restarted |
+| Crash or watchdog reset during a held stop | K1 closes for the fraction of a second the ESP32 takes to restart (the machine may click on briefly), then the stop is held again until the paddle is off |
 | `loop()` stalls for 20 s (`WATCHDOG_S`) | The watchdog resets the board, and K1 closes |
 
 ### Fail-safe guarantees
@@ -155,7 +161,7 @@ V3.1 board and soldered in by hand (see below).
 4. **First power-up on the bench.** With only USB connected: the LED lights;
    GPIO5 high makes K1 open (measure the resistance between J3 pin 4 and J4
    pin 4); shorting J3 pin 4 to pin 1 pulls GPIO8 low. Measure across C9 as
-   well: expect 5.0–5.5 V from PS1.
+   well: expect about 4.6–5.5 V from PS1.
 
 Work inside the Micra only with it unplugged. Mains is present in the chassis.
 

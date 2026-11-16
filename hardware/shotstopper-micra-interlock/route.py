@@ -224,8 +224,8 @@ def net_masks(n):
 # ---- routing order --------------------------------------------------------------------
 ORDER = ["USB_DP", "USB_DN", "VUSB", "CC1", "CC2", "EN", "GND", "+3V3", "SHIELD", "LEDK_B", "LEDK_G", "LEDK_R",
          "LED_B", "LED_G", "LED_R", "BOOT", "STOP", "K1_A", "SENSE",
-         "PADDLE", "BRAIN", "KEY2", "KEY3", "COMMON", "U1_K", "U1_A", "ISO5V",
-         "VIN"]
+         "ISO5V", "PADDLE", "BRAIN", "KEY2", "KEY3", "COMMON", "U1_K", "U1_A",
+         "VIN_J", "VIN"]
 ORDER = [n for n in ORDER if n in D.NETS] + [n for n in D.NETS if n not in ORDER]
 if len(sys.argv) > 2:
     ORDER = sys.argv[2].split(",") + [n for n in ORDER if n not in sys.argv[2].split(",")]

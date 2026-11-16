@@ -2,8 +2,8 @@ Item,Designator,Qty,Manufacturer,Mfg Part #,Description / Value,Package/Footprin
 1,U3,1,Espressif,ESP32-C3-WROOM-02-N4,"ESP32-C3-WROOM-02-N4 - ESP32-C3 module, 4 MB flash, PCB antenna",ESP32-C3-WROOM-02,SMD,
 2,USB1,1,HRO,TYPE-C-31-M-12,USB-C - USB-C receptacle (power + programming),USB_C_Receptacle_HRO_TYPE-C-31-M-12,SMD,
 3,U2,1,Texas Instruments,TLV75733PDBVR,TLV75733P - LDO 3.3 V 1 A,SOT-23-5,SMD,
-4,D1,1,Nexperia,"PMEG6010CEH,115",PMEG6010CEH - Schottky 60 V 1 A: USB 5 V into VIN,D_SOD-123F,SMD,
-5,D2,1,MEIHUA,MHP5050RGBDT,"RGB - RGB LED 5050, common anode (LCSC C409780, as V3.1)",LED_RGB_5050_MHP,SMD,LCSC C409780 (as ShotStopper V3.1); pin 1 = cathode of blue
+4,"D1,D5",2,Nexperia,"PMEG6010CEH,115",PMEG6010CEH,D_SOD-123F,SMD,
+5,D2,1,MEIHUA,MHP5050RGBDT,"RGB - RGB LED 5050 (LCSC C409780, as V3.1); anodes 1/3/5, cathodes 2 B, 4 G, 6 R",LED_RGB_5050_MHP,SMD,LCSC C409780 (as ShotStopper V3.1); cathode mark (pin 2 corner) at the silkscreen dot
 6,D3,1,Nexperia,"PRTR5V0U2X,215",PRTR5V0U2X - USB ESD protection,SOT-143,SMD,
 7,SW1,1,XKB,TS-1187A-B-A-B,"BOOT - Tactile switch (boot, GPIO9)",SW_Push_1P1T_XKB_TS-1187A,SMD,
 8,SW2,1,XKB,TS-1187A-B-A-B,"RESET - Tactile switch (reset, EN)",SW_Push_1P1T_XKB_TS-1187A,SMD,
@@ -18,11 +18,12 @@ Item,Designator,Qty,Manufacturer,Mfg Part #,Description / Value,Package/Footprin
 17,R8,1,Yageo,RC0603FR-071ML,1M - USB shield to GND,R_0603_1608Metric,SMD,
 18,K1,1,Littelfuse,CPC1117NTR,CPC1117N - OptoMOS relay 1-Form-B (normally closed) 60V 120mA,SOP-4_3.8x4.1mm_P2.54mm,SMD,Normally-CLOSED type; do not substitute a normally-open relay
 19,U1,1,Everlight,EL357N(C)(TA)-G,"EL357N - Optocoupler, paddle sense",SO-4_4.4x3.6mm_P2.54mm,SMD,
-20,PS1,1,Mornsun,B0305S-1WR3,B0305S-1WR3 - Isolated DC-DC 3.3V->5V 1W SIP-4,Converter_DCDC_Murata_MEE1SxxxxSC_THT,Thru-hole,Through-hole SIP-4; Murata MEE1S0305SC is a pin-compatible alternative
+20,PS1,1,Mornsun,B0505S-1WR3,B0505S-1WR3 - Isolated DC-DC 5V->5V 1W SIP-4,Converter_DCDC_Murata_MEE1SxxxxSC_THT,Thru-hole,"Through-hole SIP-4, 5 V in / 5 V out"
 21,D4,1,Diodes Inc,1N4148WS-7-F,1N4148WS - Signal diode,D_SOD-323,SMD,
 22,R1,1,Yageo,RC0603FR-07390RL,390 - K1 LED current,R_0603_1608Metric,SMD,
 23,R10,1,Yageo,RC0603FR-071KL,1k - Paddle sense current,R_0603_1608Metric,SMD,
-24,R11,1,Yageo,RC1206FR-07240RL,240 - DC-DC minimum load (0.25 W),R_1206_3216Metric,SMD,
+24,R11,1,Yageo,RC1206FR-07220RL,220 - DC-DC minimum load (0.25 W),R_1206_3216Metric,SMD,
 25,R12,1,Yageo,RC0603FR-07680RL,680 - U1 LED leakage shunt,R_0603_1608Metric,SMD,
 26,R13,1,Yageo,RC0603FR-0747KL,47k - Paddle sense pull-up,R_0603_1608Metric,SMD,
-27,"C8,C9",2,Samsung,CL21A475KAQNNNE,4.7u,C_0805_2012Metric,SMD,
+27,C8,1,Samsung,CL21A475KAQNNNE,4.7u - DC-DC input,C_0805_2012Metric,SMD,
+28,C9,1,Samsung,CL21A106KAYNNNE,10u - DC-DC output,C_0805_2012Metric,SMD,
