@@ -5,3 +5,4 @@ float seconds_f(); void setColor(int rgb[3]); void readButton(); void setInterlo
 void paddleInterlock_task(); void paddleInterlock_events(); void peripheral_task(); void scaleHealth_task(); void ota_task(); void scaleConnected_task();
 
 float shotElapsed_s(); void paddleTick(void*); void startPaddleTimer();
+void status_task();

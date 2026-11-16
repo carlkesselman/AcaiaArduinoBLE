@@ -39,9 +39,10 @@
 #define BUTTON_READ_PERIOD_MS 5
 #define DRIP_DELAY_S          3     // Time after the shot ended to measure the final weight
 
-#define EEPROM_SIZE 2  // This is 1-Byte
+#define EEPROM_SIZE 3  // one byte each
 #define WEIGHT_ADDR 0  // Use the first byte of EEPROM to store the goal weight
 #define OFFSET_ADDR 1  
+#define MODE_ADDR 2    // 1 = manual mode (see modeCharacteristic)
 
 #define DEBUG false
 
@@ -201,6 +202,19 @@ bool paddleOffEventSeen = false;
 unsigned long lastWeightRx_ms = 0;
 bool weightSeen = false;             // a weight packet has arrived on this connection
 int overTargetCount = 0;
+// Manual mode: brew-by-weight switched off over Bluetooth. The shot is still
+// tared, timed and reported, but nothing stops it except the paddle: the
+// interlock is never opened. A change is only taken up while idle (paddle off,
+// no stop held), so a write can neither start nor stop a brew.
+bool manualMode = false;
+bool manualRequested = false;
+#define NO_AUTO_STOP (TIMER_ONLY || manualMode)
+// Reporting over Bluetooth
+uint8_t lastStatus = 0xFF;
+unsigned long lastTimeReport_ms = 0;
+bool finalPending = false;           // the last shot's final weight has not been reported yet
+bool finalTared = false;
+unsigned long shotEnded_ms = 0;
 // These survive a crash or watchdog reset (not a power cycle):
 //  savedInterlock  a stop was being held: keep holding, don't restart a finished shot
 //  savedShot       a weighed shot was running: stop it, nothing is weighing it any more
@@ -241,6 +255,19 @@ BLEByteCharacteristic weightCharacteristic("0xFF11",  BLEWrite | BLERead);
 BLEFloatCharacteristic flowCharacteristic("0xFF12",  BLERead | BLENotify);   // g/s during a shot
 BLEByteCharacteristic batteryCharacteristic("0xFF13", BLERead | BLENotify);  // scale battery %, 255 = unknown
 BLEByteCharacteristic otaCharacteristic("0xFF14",     BLEWrite | BLERead);   // write 1 to open the OTA window, 0 to close
+BLEByteCharacteristic statusCharacteristic("0xFF15",  BLERead | BLENotify);  // STATUS_* bits. Read-only.
+BLEByteCharacteristic modeCharacteristic("0xFF16",    BLEWrite | BLERead);   // 0 = brew by weight, 1 = manual. Stored.
+BLEFloatCharacteristic shotTimeCharacteristic("0xFF17",   BLERead | BLENotify); // s: runs during a shot, then holds its length
+BLEFloatCharacteristic shotWeightCharacteristic("0xFF18", BLERead | BLENotify); // g: final weight of the last shot, once the
+                                                                                //  drips have settled. NaN until then, or if
+                                                                                //  the shot was not tared.
+#define STATUS_PADDLE_ON  0x01  // paddle (or brew switch) is on
+#define STATUS_HELD       0x02  // interlock open: paddle on, brew stopped. Turn the paddle off.
+#define STATUS_SHOT       0x04  // a shot is being timed
+#define STATUS_WEIGHING   0x08  // ...and will be stopped at the target weight
+#define STATUS_SCALE      0x10  // scale connected
+#define STATUS_FAULT      0x20  // interlock disabled until restart (plugs look swapped)
+#define STATUS_MANUAL     0x40  // manual mode in effect
 unsigned long otaWindowEnd_ms = OTA_BOOT_WINDOW_S * 1000UL;
 int lastBattery = -2;
 timer_state lastTimerState = TIMER_IDLE;
@@ -283,6 +310,10 @@ void setup() {
     goalWeight = 36;
     Serial.print("Goal Weight set to: ");
     Serial.println(goalWeight);
+  }
+  manualMode = manualRequested = (EEPROM.read(MODE_ADDR) == 1);  // blank EEPROM (0xFF): brew by weight
+  if(manualMode){
+    Serial.println("manual mode: brew-by-weight is off");
   }
   if(weightOffset > MAX_OFFSET){
     weightOffset = 1.5;
@@ -334,11 +365,19 @@ void setup() {
   weightService.addCharacteristic(flowCharacteristic);
   weightService.addCharacteristic(batteryCharacteristic);
   weightService.addCharacteristic(otaCharacteristic);
+  weightService.addCharacteristic(statusCharacteristic);
+  weightService.addCharacteristic(modeCharacteristic);
+  weightService.addCharacteristic(shotTimeCharacteristic);
+  weightService.addCharacteristic(shotWeightCharacteristic);
   BLE.addService(weightService);
   weightCharacteristic.writeValue(goalWeight);
   flowCharacteristic.writeValue(0.0f);
   batteryCharacteristic.writeValue(255);
   otaCharacteristic.writeValue(OTA_ENABLED ? 1 : 0);
+  modeCharacteristic.writeValue(manualMode ? 1 : 0);
+  shotTimeCharacteristic.writeValue(0.0f);
+  shotWeightCharacteristic.writeValue(NAN);
+  status_task();
   BLE.advertise();
   Serial.println("Bluetooth® device active, waiting for connections...");
 }
@@ -390,6 +429,28 @@ void loop() {
   if(interlockFault){
     setColor((millis() / 250) % 2 ? WHITE : OFF);
   }
+  status_task();
+}
+
+// Take up a requested mode change while idle, and report the state over
+// Bluetooth when it changes. Reporting only: nothing here acts on the machine.
+void status_task(){
+  if(manualRequested != manualMode && !shot.brewing && !interlockOpen && !newButtonState){
+    manualMode = manualRequested;
+    Serial.println(manualMode ? "manual mode: brew-by-weight is off" : "brew-by-weight is on");
+  }
+  uint8_t st = 0;
+  if(newButtonState)      st |= STATUS_PADDLE_ON;
+  if(interlockOpen)       st |= STATUS_HELD;
+  if(shot.brewing)        st |= STATUS_SHOT;
+  if(shot.brewing && shot.tracked && !NO_AUTO_STOP) st |= STATUS_WEIGHING;
+  if(scale.isConnected()) st |= STATUS_SCALE;
+  if(interlockFault)      st |= STATUS_FAULT;
+  if(manualMode)          st |= STATUS_MANUAL;
+  if(st != lastStatus){
+    lastStatus = st;
+    statusCharacteristic.writeValue(st);
+  }
 }
 
 void setBrewingState(bool brewing){
@@ -406,21 +467,28 @@ void setBrewingState(bool brewing){
     shot.disturbed = false;
     shot.learn = false;
     shot.lastWeight = NAN;
+    finalPending = false;
+    shotTimeCharacteristic.writeValue(0.0f);
+    shotWeightCharacteristic.writeValue(NAN);
+    lastTimeReport_ms = millis();
     // Only trust the scale for this shot if it is streaming weight right now
     // and is set to grams. Otherwise the shot is left to the paddle.
     shot.tracked = true;
-    if(!TIMER_ONLY && (scale.msSinceLastPacket() > STREAM_STALE_MS
+    if(!NO_AUTO_STOP && (scale.msSinceLastPacket() > STREAM_STALE_MS
                        || !weightSeen || millis() - lastWeightRx_ms > STREAM_STALE_MS)){
       Serial.println("no recent weight from the scale: shot left to the paddle");
       shot.tracked = false;
     }
-    if(!TIMER_ONLY && scale.unitsOunces()){
+    if(!NO_AUTO_STOP && scale.unitsOunces()){
       Serial.println("scale is set to ounces: shot left to the paddle");
       shot.tracked = false;
     }
     if(!shot.tracked){
       setColor(MAGENTA);
       return;
+    }
+    if(manualMode){
+      Serial.println("manual mode: shot left to the paddle");
     }
     if(PADDLE_INTERLOCK){
       savedShot = SHOT_TRACKED;   // before any Bluetooth call: a reset from here on stops the shot
@@ -447,7 +515,7 @@ void setBrewingState(bool brewing){
     bool autoStop = false;
     if(PADDLE_INTERLOCK){
       bool lostScale = STOP_ON_SCALE_LOSS && ENDTYPE::DISCONNECT == shot.end && shot.tracked && paddleState;
-      if(!TIMER_ONLY && (ENDTYPE::WEIGHT == shot.end || ENDTYPE::TIME == shot.end || lostScale)){
+      if(!NO_AUTO_STOP && (ENDTYPE::WEIGHT == shot.end || ENDTYPE::TIME == shot.end || lostScale)){
         setInterlock(true);
         autoStop = true;
       }
@@ -474,7 +542,7 @@ void setBrewingState(bool brewing){
 
     shot.end_s = shotElapsed_s();
     scale.stopTimer();
-    shot.learn = shot.tracked && !shot.disturbed
+    shot.learn = shot.tracked && !shot.disturbed && !NO_AUTO_STOP   // a manual shot teaches nothing
               && (!AUTOTARE || scale.tareState() == TARE_CONFIRMED);
     Serial.print("shot summary: ");
     Serial.print(shot.end_s);
@@ -489,13 +557,19 @@ void setBrewingState(bool brewing){
     }
     Serial.println();
     flowCharacteristic.writeValue(0.0f);
+    shotTimeCharacteristic.writeValue(shot.end_s);
+    // The final weight is reported DRIP_DELAY_S from now (scaleConnected_task),
+    // if the scale was zeroed for this shot.
+    finalPending = true;
+    finalTared = shot.tracked && (!AUTOTARE || scale.tareState() == TARE_CONFIRMED);
+    shotEnded_ms = millis();
     if(PADDLE_INTERLOCK){
       if(autoStop){
         Serial.println(interlockFault ? "plugs look swapped: interlock left closed"
                                       : "interlock open, waiting for paddle off");
       }
     }
-    else if(!TIMER_ONLY 
+    else if(!NO_AUTO_STOP 
     && MOMENTARY 
     && (ENDTYPE::WEIGHT == shot.end || ENDTYPE::TIME == shot.end)){
       //Pulse button to stop brewing
@@ -503,7 +577,7 @@ void setBrewingState(bool brewing){
       delay(300);
       digitalWrite(OUT,LOW);Serial.println("wrote low");
       buttonPressed = false;
-    }else if(!TIMER_ONLY && !MOMENTARY){
+    }else if(!NO_AUTO_STOP && !MOMENTARY){
       buttonLatched = false;
       buttonPressed = false;
       Serial.println("Button Unlatched and not pressed");
@@ -748,7 +822,7 @@ void paddleInterlock_task(){
     }
   }
 
-  if(INTERLOCK_MAX_BREW_S > 0 && !TIMER_ONLY && newButtonState && !interlockOpen && !interlockFault
+  if(INTERLOCK_MAX_BREW_S > 0 && !NO_AUTO_STOP && newButtonState && !interlockOpen && !interlockFault
   && now - paddleOnSince_ms > INTERLOCK_MAX_BREW_S * 1000UL){
     Serial.println("paddle on too long: stopping the brew");
     if(shot.brewing && scale.isConnected()){
@@ -805,6 +879,15 @@ void peripheral_task(){
     Serial.println(goalWeight);
     EEPROM.write(WEIGHT_ADDR, goalWeight); //1 byte, 0-255
     EEPROM.commit();
+  }
+  if (modeCharacteristic.written()) {
+    manualRequested = modeCharacteristic.value() == 1;
+    modeCharacteristic.writeValue(manualRequested ? 1 : 0);
+    if(EEPROM.read(MODE_ADDR) != (manualRequested ? 1 : 0)){
+      EEPROM.write(MODE_ADDR, manualRequested ? 1 : 0);
+      EEPROM.commit();
+    }
+    Serial.println(manualRequested ? "manual mode requested" : "brew-by-weight requested");
   }
   if (otaCharacteristic.written()) {
     otaWindowEnd_ms = otaCharacteristic.value() ? millis() + OTA_REQUEST_WINDOW_S * 1000UL : 0;
@@ -907,6 +990,19 @@ void scaleConnected_task(){
   // the predicted end time nor MAX_SHOT_DURATION_S can end the shot.
   if(shot.brewing){
     shot.shotTimer = shotElapsed_s();
+    if(millis() - lastTimeReport_ms >= 500){
+      lastTimeReport_ms = millis();
+      shotTimeCharacteristic.writeValue(shot.shotTimer);
+    }
+  }
+  if(finalPending && !shot.brewing && millis() - shotEnded_ms >= DRIP_DELAY_S * 1000UL){
+    finalPending = false;
+    bool fresh = weightSeen && millis() - lastWeightRx_ms <= STREAM_STALE_MS;
+    shotWeightCharacteristic.writeValue((finalTared && fresh) ? currentWeight : NAN);
+    if(finalTared && fresh){
+      Serial.print("final shot weight ");
+      Serial.println(currentWeight);
+    }
   }
 
   // always call newWeightAvailable to actually receive the datapoint from the scale,
@@ -920,7 +1016,7 @@ void scaleConnected_task(){
 
     if(!shot.brewing){
       int battery = scale.batteryPercent();
-      setColor((battery >= 0 && battery <= LOW_BATTERY_PCT) ? CYAN : GREEN);
+      setColor(manualMode ? BLUE : (battery >= 0 && battery <= LOW_BATTERY_PCT) ? CYAN : GREEN);
     }
 
     // Readings taken before the tare took effect include the cup; drop them
@@ -941,7 +1037,7 @@ void scaleConnected_task(){
     // Backstop that does not depend on the trend line or on the readings being
     // judged plausible: once the tare is confirmed, two readings in a row at
     // or above the target end the shot.
-    if(shot.brewing && shot.tracked && !TIMER_ONLY
+    if(shot.brewing && shot.tracked && !NO_AUTO_STOP
     && (!AUTOTARE || tareNow == TARE_CONFIRMED)
     && currentWeight >= goalWeight - weightOffset){
       overTargetCount++;
@@ -997,7 +1093,7 @@ void scaleConnected_task(){
   }
     
   // button held. Take over for the rest of the shot.
-  else if(!TIMER_ONLY
+  else if(!NO_AUTO_STOP
   && !MOMENTARY 
   && shot.brewing 
   && shot.tracked
@@ -1032,7 +1128,7 @@ void scaleConnected_task(){
   //Max duration reached
   // (An unweighed shot is left to the paddle in interlock mode, where
   // INTERLOCK_MAX_BREW_S covers it; the other modes end it here as before.)
-  if(!TIMER_ONLY 
+  if(!NO_AUTO_STOP 
   && shot.brewing 
   && (shot.tracked || !PADDLE_INTERLOCK)
   && shot.shotTimer > MAX_SHOT_DURATION_S ){
@@ -1044,7 +1140,7 @@ void scaleConnected_task(){
 
   // Weight readings arriving but none believable for READINGS_LOST_S: the
   // shot can no longer be weighed. Same handling as a lost scale.
-  if(!TIMER_ONLY
+  if(!NO_AUTO_STOP
   && shot.brewing
   && shot.tracked
   && !isnan(shot.lastWeight)
@@ -1057,14 +1153,14 @@ void scaleConnected_task(){
 
   //Blink LED while brewing
   if(shot.brewing){
-    setColor( (millis()/1000)%2 ? (shot.tracked ? GREEN : MAGENTA) : BLUE );
+    setColor( (millis()/1000)%2 ? ((shot.tracked && !manualMode) ? GREEN : MAGENTA) : BLUE );
   }
 
   //End shot
   // Only stop by weight once the tare is confirmed: with the cup still on the
   // scale the trend line predicts an end time in the past and would stop the
   // shot as soon as MIN_SHOT_DURATION_S is reached.
-  if(!TIMER_ONLY
+  if(!NO_AUTO_STOP
   && shot.brewing
   && shot.tracked
   && (!AUTOTARE || scale.tareState() == TARE_CONFIRMED)
@@ -1080,7 +1176,7 @@ void scaleConnected_task(){
   // SHOT ANALYSIS  --------------------------------
 
   //Detect error of shot
-  if(!TIMER_ONLY
+  if(!NO_AUTO_STOP
   && shot.start_timestamp_s
   && shot.end_s
   && shot.learn

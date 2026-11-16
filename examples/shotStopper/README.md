@@ -71,6 +71,43 @@ for example LightBlue or nRF Connect.
 | `FF12` | read / notify | Flow rate during a shot, g/s (float) |
 | `FF13` | read / notify | Scale battery %, 255 = unknown |
 | `FF14` | read / write | Write `1` to open a 10-minute OTA window, `0` to close it |
+| `FF15` | read / notify | Status bits (1 byte, below). Read-only |
+| `FF16` | read / write | Mode: `0` brew by weight, `1` manual. Kept across restarts |
+| `FF17` | read / notify | Shot time, seconds (float): counts during a shot, then holds its length |
+| `FF18` | read / notify | Final weight of the last shot, grams (float) |
+
+### Status (`FF15`)
+
+| Bit | Value | Meaning |
+|-----|-------|---------|
+| 0 | `0x01` | Paddle (or brew switch) is on |
+| 1 | `0x02` | Held: the paddle is on but the brew has been stopped. Turn the paddle off |
+| 2 | `0x04` | A shot is being timed |
+| 3 | `0x08` | The shot is being weighed and will stop at the goal weight |
+| 4 | `0x10` | Scale connected |
+| 5 | `0x20` | Interlock disabled until restart (the J3 and J4 plugs look swapped) |
+| 6 | `0x40` | Manual mode is in effect |
+
+Nothing in this value can be written, and none of the Bluetooth values can
+start or stop a brew.
+
+### Manual mode (`FF16`)
+
+Manual mode switches brew-by-weight off. The paddle alone starts and stops
+the brew: the board never stops a shot, by weight, by time or by the
+90-second limit. The scale is still tared and the shot is still timed and
+reported. The idle LED is blue instead of green.
+
+A change of mode is taken up only while idle (paddle off, no stop held). A
+write during a shot or a held stop applies from the next shot, so it cannot
+start or stop a brew. `FF16` reads back what was requested; bit 6 of the
+status shows what is in effect.
+
+### Final weight (`FF18`)
+
+Set 3 seconds after the shot ends, once the drips have settled. It is NaN
+from the start of a shot until then, and stays NaN if the scale was not
+zeroed for the shot or has stopped sending weight.
 
 ## Flow rate
 

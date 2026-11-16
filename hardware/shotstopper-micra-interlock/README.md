@@ -181,7 +181,7 @@ What the firmware does in this mode:
   make the machine brew.
 
 These cases are covered by host tests (`tests/interlock/run.sh`: the real
-sketch and library against stub Arduino and Bluetooth headers, 26 scripted
+sketch and library against stub Arduino and Bluetooth headers, 30 scripted
 scenarios), not on hardware.
 
 Flow rate, the scale sanity checks and over-the-air updates are described

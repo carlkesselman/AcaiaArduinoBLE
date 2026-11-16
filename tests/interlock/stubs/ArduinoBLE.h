@@ -48,8 +48,9 @@ struct BLEByteCharacteristic : BLECharacteristic {
   void writeValue(uint8_t x) { v = x; } bool written() { bool r = w; w = false; return r; } uint8_t value() { return v; }
 };
 struct BLEFloatCharacteristic : BLECharacteristic {
+  float v = 0;
   BLEFloatCharacteristic(const char*, int) : BLECharacteristic(3) {}
-  void writeValue(float) {}
+  void writeValue(float x) { v = x; }
 };
 struct BLELocalDeviceStub {
   int begin() { return 1; } void setTimeout(uint32_t) {} void setLocalName(const char*) {} void setAdvertisedService(BLEService&) {} void addService(BLEService&) {} void advertise() {}
