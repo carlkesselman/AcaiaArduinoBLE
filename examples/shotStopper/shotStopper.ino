@@ -39,10 +39,11 @@
 #define BUTTON_READ_PERIOD_MS 5
 #define DRIP_DELAY_S          3     // Time after the shot ended to measure the final weight
 
-#define EEPROM_SIZE 3  // one byte each
+#define EEPROM_SIZE 4  // one byte each
 #define WEIGHT_ADDR 0  // Use the first byte of EEPROM to store the goal weight
 #define OFFSET_ADDR 1  
 #define MODE_ADDR 2    // 1 = manual mode (see modeCharacteristic)
+#define BOOTS_ADDR 3   // power-ons in a row that lasted under POWER_SIGNAL_S (see Recovery)
 
 #define DEBUG false
 
@@ -86,12 +87,25 @@
                               //  the shot (as the V2.1 board does). false leaves it to the paddle.
 #endif
 #ifndef OTA_ENABLED
-#define OTA_ENABLED false     // Over-the-air updates over WiFi. Needs secrets.h (copy
-                              //  secrets.example.h). WiFi is only on while idle, for
-                              //  OTA_BOOT_WINDOW_S after boot or after an OTA request over BLE.
+#define OTA_ENABLED false     // WiFi: the event log page, and the routes into the recovery
+                              //  firmware that loads updates (see README, "Updates"). Needs
+                              //  secrets.h (copy secrets.example.h). WiFi is only on while idle,
+                              //  for OTA_BOOT_WINDOW_S after boot or after a request over BLE.
 #endif
 #define OTA_BOOT_WINDOW_S 300
 #define OTA_REQUEST_WINDOW_S 600
+#define OTA_CONFIRM_S 30      // A firmware started by the recovery firmware must run this long
+                              //  without resetting; otherwise the board goes back to recovery.
+#define CRASH_LIMIT 3         // This many crashes or watchdog resets in a row, each within
+#define CRASH_CLEAR_S 120     //  CRASH_CLEAR_S of starting: restart into recovery.
+#define POWER_SIGNAL_COUNT 5  // Power switched on this many times in a row, each time for less
+#define POWER_SIGNAL_S 10     //  than POWER_SIGNAL_S: restart into recovery.
+#ifndef EVENT_LOG
+#define EVENT_LOG OTA_ENABLED // Keep a log of scale and shot events in flash (about 8000 events,
+                              //  oldest overwritten), readable at http://shotstopper.local/
+                              //  while WiFi is on, and from the recovery firmware. See README.
+#endif
+#define LOG_STALL_MS 1000     // log any pass of loop() that takes longer than this
 #define WATCHDOG_S 20         // Interlock mode: reset the board if loop() stalls this long.
                               //  On reset the interlock closes, so the paddle works again.
 //***************
@@ -99,7 +113,7 @@
 
 #if OTA_ENABLED
   #include <WiFi.h>
-  #include <ArduinoOTA.h>
+  #include <ESPmDNS.h>
   #if __has_include("secrets.h")
     #include "secrets.h"
   #else
@@ -108,6 +122,28 @@
   #ifndef OTA_HOSTNAME
     #define OTA_HOSTNAME "shotstopper"
   #endif
+#endif
+
+#include "eventlog.h"
+#if EVENT_LOG
+  #include <esp_partition.h>
+  #include <WebServer.h>
+  #ifndef LOG_TZ
+    #define LOG_TZ "UTC0"     // time zone of the log's dates (POSIX TZ string), set in secrets.h
+  #endif
+#endif
+
+// Recovery. The board has a second, fixed firmware (recovery/) that loads
+// updates; this one cannot replace itself. A firmware that recovery has just
+// started is on probation: if the board resets before it is confirmed, the
+// bootloader goes back to recovery. The core would confirm it at boot;
+// returning true here leaves that to ota_task(), after OTA_CONFIRM_S.
+#if OTA_ENABLED && defined(CONFIG_APP_ROLLBACK_ENABLE)
+  #include <esp_ota_ops.h>
+  #define RECOVERY 1
+  extern "C" bool verifyRollbackLater(){ return true; }
+#else
+  #define RECOVERY 0
 #endif
 
 // Board Hardware 
@@ -273,6 +309,380 @@ int lastBattery = -2;
 timer_state lastTimerState = TIMER_IDLE;
 bool unitWarned = false;
 
+// ---------------------------------------------------------------------------
+// Event log. logEvent() only puts a record in a queue in memory, so it is safe
+// anywhere, including the stop path. log_task() moves the queue to flash while
+// the machine is idle: flash is never written during a shot. The queue is in
+// RTC memory, so the events leading up to a crash or watchdog reset survive it.
+// ---------------------------------------------------------------------------
+#if EVENT_LOG
+#define LOG_QUEUE 64
+#define LOG_QUEUE_MAGIC 0x109E7E57
+struct LogQueue { uint32_t magic; uint16_t n; uint16_t dropped; LogRec q[LOG_QUEUE]; };
+RTC_NOINIT_ATTR LogQueue logQueue;
+const esp_partition_t* logPartition = NULL;
+LogStore logStore;
+EventLog eventLog;
+WebServer logServer(80);
+bool logSkipStall = false;   // this pass of loop() was slow for a known reason
+#endif
+
+// (The first function in the sketch must be outside any #if: the Arduino build
+// puts its generated prototypes just before it.)
+void logEvent(uint8_t code, uint8_t a, int32_t c){
+#if EVENT_LOG
+  if(logQueue.magic != LOG_QUEUE_MAGIC || logQueue.n > LOG_QUEUE){
+    logQueue.magic = LOG_QUEUE_MAGIC;
+    logQueue.n = 0;
+    logQueue.dropped = 0;
+  }
+  if(logQueue.n >= LOG_QUEUE){
+    if(logQueue.dropped < 0xFFFF){
+      logQueue.dropped++;
+    }
+    return;
+  }
+  LogRec& r = logQueue.q[logQueue.n++];
+  r.seq = 0; r.t_ms = millis(); r.code = code; r.a = a; r.crc = 0; r.c = c;
+#elif defined(LOG_EVENT_HOOK)
+  LOG_EVENT_HOOK(code, a, c);     // tests/interlock prints the events
+#else
+  (void)code; (void)a; (void)c;   // logging is not built in
+#endif
+}
+
+#if EVENT_LOG
+bool logRead(uint32_t o, void* b, uint32_t n){ return esp_partition_read(logPartition, o, b, n) == ESP_OK; }
+bool logWrite(uint32_t o, const void* b, uint32_t n){ return esp_partition_write(logPartition, o, b, n) == ESP_OK; }
+bool logErase(uint32_t o, uint32_t n){ return esp_partition_erase_range(logPartition, o, n) == ESP_OK; }
+
+uint32_t buildId(){
+  uint32_t h = 2166136261u;   // FNV-1a of the build date and time
+  for(const char* p = __DATE__ " " __TIME__; *p; p++){
+    h = (h ^ (uint8_t)*p) * 16777619u;
+  }
+  return h;
+}
+
+void log_begin(){
+  // The "spiffs" partition of the min_spiffs scheme (128 KB) holds the log, raw.
+  logPartition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, NULL);
+  if(logPartition){
+    logStore.size = logPartition->size - logPartition->size % LOG_SECTOR_BYTES;
+    logStore.read = logRead; logStore.write = logWrite; logStore.erase = logErase;
+    eventLog.begin(&logStore);
+  }
+  if(!eventLog.ok()){
+    Serial.println("event log: no usable partition, logging is off");
+  }
+  logEvent(LOG_BOOT, (uint8_t)esp_reset_reason(), (int32_t)(eventLog.lastBootNumber() + 1));
+  logEvent(LOG_FIRMWARE, 0, (int32_t)buildId());
+}
+#endif
+
+// What the log needs to know about the scale link and the current shot.
+unsigned long scaleInitStart_ms = 0;
+unsigned long scaleReady_ms = 0;
+unsigned long scaleChecksum0 = 0;
+uint8_t scaleFailsInARow = 0;
+unsigned long shotLastPacket_ms = 0;
+unsigned long shotMaxGap_ms = 0;
+unsigned long shotChecksum0 = 0;
+uint16_t shotPackets = 0;
+uint8_t shotGaps = 0;
+
+void logScaleSession(){
+  unsigned long bad = scale.checksumErrors() - scaleChecksum0;
+  logEvent(LOG_SCALE_SESSION, bad > 255 ? 255 : (uint8_t)bad, (int32_t)((millis() - scaleReady_ms) / 1000));
+}
+
+// Called by the scale library when the link is made, fails or drops.
+void onScaleEvent(scale_event e, long detail){
+  switch(e){
+    case SCALE_EVENT_READY:
+      logEvent(LOG_SCALE_READY, (detail < 0 && detail > -256) ? (uint8_t)(-detail) : 0, (int32_t)(millis() - scaleInitStart_ms));
+      scaleFailsInARow = 0;
+      scaleReady_ms = millis();
+      scaleChecksum0 = scale.checksumErrors();
+      break;
+    case SCALE_EVENT_CONNECT_FAILED:
+    case SCALE_EVENT_SETUP_FAILED:
+      if(scaleFailsInARow < 255){
+        scaleFailsInARow++;
+      }
+      // A scale that keeps failing must not fill the log: the first ten, then every 50th.
+      if(scaleFailsInARow <= 10 || scaleFailsInARow % 50 == 0){
+        if(e == SCALE_EVENT_CONNECT_FAILED){
+          logEvent(LOG_SCALE_CONNECT_FAIL, scaleFailsInARow, (int32_t)(millis() - scaleInitStart_ms));
+        }else{
+          logEvent(LOG_SCALE_SETUP_FAIL, (uint8_t)detail, 0);
+        }
+      }
+      break;
+    case SCALE_EVENT_LINK_LOST:
+      logEvent(LOG_SCALE_LINK_LOST, shot.brewing, (int32_t)detail);
+      logScaleSession();
+      break;
+    case SCALE_EVENT_TIMEOUT:
+      logEvent(LOG_SCALE_TIMEOUT, shot.brewing, (int32_t)detail);
+      logScaleSession();
+      break;
+    case SCALE_EVENT_WRITE_FAILED:
+      logEvent(LOG_SCALE_WRITE_FAIL, shot.brewing, 0);
+      logScaleSession();
+      break;
+    case SCALE_EVENT_TARE_RETRY:   logEvent(LOG_TARE_RETRY, (uint8_t)detail, 0); break;
+    case SCALE_EVENT_TARE_FAILED:  logEvent(LOG_TARE_FAILED, 0, 0); break;
+    case SCALE_EVENT_TIMER_RETRY:  logEvent(LOG_TIMER_RETRY, (uint8_t)detail, 0); break;
+    case SCALE_EVENT_TIMER_FAILED: logEvent(LOG_TIMER_FAILED, 0, 0); break;
+  }
+}
+
+// Moves one queued event to flash per pass, while idle. Also notes any pass of
+// loop() that took too long: a blocked Bluetooth call shows up here.
+void log_task(){
+#if EVENT_LOG
+  static unsigned long lastPass_ms = 0;
+  unsigned long now = millis();
+  if(lastPass_ms && now - lastPass_ms > LOG_STALL_MS && !logSkipStall){
+    logEvent(LOG_LOOP_STALL, shot.brewing, (int32_t)(now - lastPass_ms));
+  }
+  logSkipStall = false;
+  lastPass_ms = now;
+
+  bool idle = !shot.brewing && !interlockOpen && !newButtonState;
+  if(!idle || !eventLog.ok() || logQueue.magic != LOG_QUEUE_MAGIC || logQueue.n == 0 || logQueue.n > LOG_QUEUE){
+    return;
+  }
+  if(eventLog.nextNeedsErase()){
+    logSkipStall = true;   // erasing a sector takes tens of ms
+  }
+  if(eventLog.append(logQueue.q[0])){
+    logQueue.n--;
+    memmove(&logQueue.q[0], &logQueue.q[1], logQueue.n * sizeof(LogRec));
+    if(logQueue.dropped && logQueue.n < LOG_QUEUE){
+      uint16_t lost = logQueue.dropped;
+      logQueue.dropped = 0;
+      logEvent(LOG_DROPPED, 0, lost);
+    }
+  }
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Recovery firmware (see README, "Updates")
+// ---------------------------------------------------------------------------
+#define CRASH_MAGIC 0xC8A50000u
+RTC_NOINIT_ATTR uint32_t crashCount;   // CRASH_MAGIC | crashes in a row; survives a reset, not a power cycle
+uint8_t recoveryWanted = 0;            // why (as logged); acted on once the machine is idle
+bool bootsCleared = false;
+
+// Restart into the recovery firmware. Only called while idle: recovery does
+// not run the interlock, so it must not take over during a stop or a shot.
+void enterRecovery(uint8_t why){
+  recoveryWanted = 0;
+#if RECOVERY
+  const esp_partition_t* recovery = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, NULL);
+  if(!recovery){
+    Serial.println("no recovery firmware on this board");
+    return;
+  }
+  Serial.println("restarting into the recovery firmware");
+  logEvent(LOG_OTA, LOG_OTA_TO_RECOVERY, why);
+#if EVENT_LOG
+  // Write the queue out now: recovery cannot see it, and can show the log.
+  for(int i = 0; i < 4 * LOG_QUEUE && eventLog.ok() && logQueue.n > 0 && logQueue.n <= LOG_QUEUE; i++){
+    if(eventLog.append(logQueue.q[0])){
+      logQueue.n--;
+      memmove(&logQueue.q[0], &logQueue.q[1], logQueue.n * sizeof(LogRec));
+    }
+    if(PADDLE_INTERLOCK){
+      esp_task_wdt_reset();
+    }
+  }
+#endif
+  crashCount = CRASH_MAGIC;
+  EEPROM.write(BOOTS_ADDR, 0);
+  EEPROM.commit();
+  if(esp_ota_set_boot_partition(recovery) != ESP_OK){   // for the factory slot: forgets the main one
+    Serial.println("could not select the recovery firmware");
+    return;
+  }
+  Serial.flush();
+  ESP.restart();
+#else
+  (void)why;
+#endif
+}
+
+// At boot: count crashes in a row and short power-ons in a row. Either sends
+// the board to recovery, but not while a stop is held or the paddle is on.
+void recovery_bootCheck(bool busy){
+#if RECOVERY
+  esp_reset_reason_t why = esp_reset_reason();
+  bool crash = why == ESP_RST_PANIC || why == ESP_RST_INT_WDT || why == ESP_RST_TASK_WDT || why == ESP_RST_WDT;
+  uint32_t crashes = (crashCount & 0xFFFF0000u) == CRASH_MAGIC ? (crashCount & 0xFFFF) : 0;
+  if(why == ESP_RST_POWERON){
+    crashes = 0;
+  }else if(crash && crashes < 0xFFFF){
+    crashes++;
+  }
+  crashCount = CRASH_MAGIC | crashes;
+
+  uint8_t boots = EEPROM.read(BOOTS_ADDR);
+  if(boots > POWER_SIGNAL_COUNT){
+    boots = 0;   // blank EEPROM
+  }
+  if(why == ESP_RST_POWERON){
+    boots++;
+    EEPROM.write(BOOTS_ADDR, boots);
+    EEPROM.commit();
+  }else{
+    bootsCleared = true;   // only power-ons count
+  }
+  if(crashes >= CRASH_LIMIT){
+    recoveryWanted = 3;
+  }
+  if(boots >= POWER_SIGNAL_COUNT){
+    recoveryWanted = 4;
+  }
+  if(recoveryWanted && !busy){
+    enterRecovery(recoveryWanted);
+  }
+#else
+  (void)busy;
+#endif
+}
+
+// While running: confirm a firmware on probation, forget old crashes and
+// short power-ons once this start has lasted, and go to recovery when asked.
+void recovery_task(bool idle){
+#if RECOVERY
+  static int8_t probation = -1;   // -1: not checked yet
+  if(probation < 0){
+    esp_ota_img_states_t st;
+    probation = esp_ota_get_state_partition(esp_ota_get_running_partition(), &st) == ESP_OK
+                && st == ESP_OTA_IMG_PENDING_VERIFY;
+    if(probation){
+      Serial.println("on probation: started by the recovery firmware");
+      logEvent(LOG_OTA, LOG_OTA_PROBATION, 0);
+    }
+  }
+  if(probation && millis() > OTA_CONFIRM_S * 1000UL){
+    esp_ota_mark_app_valid_cancel_rollback();
+    probation = 0;
+    Serial.println("firmware confirmed");
+    logEvent(LOG_OTA, LOG_OTA_CONFIRMED, 0);
+  }
+  if(millis() > CRASH_CLEAR_S * 1000UL && crashCount != CRASH_MAGIC){
+    crashCount = CRASH_MAGIC;
+  }
+  if(!bootsCleared && idle && millis() > POWER_SIGNAL_S * 1000UL){
+    bootsCleared = true;
+    if(EEPROM.read(BOOTS_ADDR) != 0){
+      EEPROM.write(BOOTS_ADDR, 0);
+      EEPROM.commit();
+    }
+  }
+  if(recoveryWanted && idle){
+    enterRecovery(recoveryWanted);
+  }
+#else
+  (void)idle;
+#endif
+}
+
+#if EVENT_LOG
+// POST http://shotstopper.local/recovery (user "ota", the upload password):
+// restart into the recovery firmware once the machine is idle.
+void recoveryPage(){
+  if(!logServer.authenticate("ota", OTA_PASSWORD)){
+    logServer.requestAuthentication();
+    return;
+  }
+  recoveryWanted = 2;
+  logServer.send(200, "text/plain", "restarting into the recovery firmware\n");
+  delay(200);   // let the answer leave before WiFi goes down
+}
+
+// http://shotstopper.local/        the newest 2000 events as text (?n=500 for fewer)
+// http://shotstopper.local/log.bin the same records, raw
+// Read-only, and only reachable while WiFi is on (see ota_task).
+void logPage(){
+  logSkipStall = true;
+  uint32_t n = logServer.hasArg("n") ? (uint32_t)logServer.arg("n").toInt() : 2000;
+  if(n == 0){
+    n = 2000;
+  }
+  static LogPrinter printer;
+  printer = LogPrinter();
+  eventLog.forEach(n, [](const LogRec& r){ printer.scan(r); });
+  for(int i = 0; i < logQueue.n && i < LOG_QUEUE; i++){
+    printer.scan(logQueue.q[i]);
+  }
+  logServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  logServer.send(200, "text/plain; charset=utf-8", "");
+  char line[200];
+  String chunk;
+  chunk.reserve(1600);
+  snprintf(line, sizeof(line), "shotStopper event log\nfirmware built %s %s (build %08lX), boot %lu, up %lu s\n",
+           __DATE__, __TIME__, (unsigned long)buildId(), (unsigned long)(eventLog.lastBootNumber() + 1), millis() / 1000);
+  chunk += line;
+  snprintf(line, sizeof(line), "scale %s, mode %s, goal %u g, offset %.1f g\n%lu events stored (room for %lu), times in %s\n\n",
+           scale.isConnected() ? "connected" : "not connected", manualMode ? "manual" : "brew by weight",
+           goalWeight, weightOffset, (unsigned long)eventLog.count(), (unsigned long)eventLog.capacity(), LOG_TZ);
+  chunk += line;
+  bool stop = false;
+  auto emit = [&](const LogRec& r){
+    if(stop){
+      return;
+    }
+    printer.line(r, line, sizeof(line));
+    chunk += line;
+    if(chunk.length() > 1200){
+      logServer.sendContent(chunk);
+      chunk = "";
+      if(PADDLE_INTERLOCK){
+        esp_task_wdt_reset();
+      }
+      // A shot has started: stop here, the loop is needed.
+      if(paddleState || !logServer.client().connected()){
+        stop = true;
+        chunk = "... cut short: a shot started\n";
+      }
+    }
+  };
+  eventLog.forEach(n, emit);
+  for(int i = 0; i < logQueue.n && i < LOG_QUEUE; i++){
+    emit(logQueue.q[i]);   // not in flash yet
+  }
+  logServer.sendContent(chunk);
+  logServer.sendContent("");
+}
+
+void logRaw(){
+  logSkipStall = true;
+  logServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  logServer.send(200, "application/octet-stream", "");
+  static LogRec block[64];
+  int k = 0;
+  eventLog.forEach(0xFFFFFFFFu, [&](const LogRec& r){
+    block[k++] = r;
+    if(k == 64){
+      logServer.sendContent((const char*)block, sizeof(block));
+      k = 0;
+      if(PADDLE_INTERLOCK){
+        esp_task_wdt_reset();
+      }
+    }
+  });
+  if(k){
+    logServer.sendContent((const char*)block, k * sizeof(LogRec));
+  }
+  logServer.sendContent("");
+}
+#endif
+
 void setup() {
   // First thing: put STOP where it belongs. After a crash or watchdog reset
   // during a held stop, or during a weighed shot, the interlock opens again at
@@ -357,6 +767,18 @@ void setup() {
   pinMode(LED_BLUE, OUTPUT);
   setColor(OFF);
 
+#if EVENT_LOG
+  log_begin();
+  logServer.on("/", logPage);
+  logServer.on("/log.bin", logRaw);
+  logServer.on("/recovery", HTTP_POST, recoveryPage);
+#endif
+  if(resumeHold){
+    logEvent(LOG_RESUME_HOLD, 0, 0);
+  }
+  recovery_bootCheck(resumeHold || newButtonState);   // before Bluetooth starts: needs nothing but the EEPROM
+  scale.onEvent(onScaleEvent);
+
   // initialize the BLE hardware
   BLE.begin();
   BLE.setTimeout(2000);   // ATT requests give up after 2 s (default 5 s): bounds how long loop() can block
@@ -415,6 +837,10 @@ void loop() {
       }
       weightSeen = false;
       if(!interlockOpen){
+        scaleInitStart_ms = millis();
+#if EVENT_LOG
+        logSkipStall = true;   // connecting blocks for seconds; its length is logged with the result
+#endif
         scale.init();
       }
       currentWeight = 0;
@@ -431,6 +857,7 @@ void loop() {
     setColor((millis() / 250) % 2 ? WHITE : OFF);
   }
   status_task();
+  log_task();
 }
 
 // Take up a requested mode change while idle, and report the state over
@@ -438,6 +865,7 @@ void loop() {
 void status_task(){
   if(manualRequested != manualMode && !shot.brewing && !interlockOpen && !newButtonState){
     manualMode = manualRequested;
+    logEvent(LOG_MODE, manualMode, 0);
     Serial.println(manualMode ? "manual mode: brew-by-weight is off" : "brew-by-weight is on");
   }
   uint8_t st = 0;
@@ -475,15 +903,27 @@ void setBrewingState(bool brewing){
     // Only trust the scale for this shot if it is streaming weight right now
     // and is set to grams. Otherwise the shot is left to the paddle.
     shot.tracked = true;
+    uint8_t startFlags = manualMode ? LOG_SS_MANUAL : 0;
     if(!NO_AUTO_STOP && (scale.msSinceLastPacket() > STREAM_STALE_MS
                        || !weightSeen || millis() - lastWeightRx_ms > STREAM_STALE_MS)){
       Serial.println("no recent weight from the scale: shot left to the paddle");
       shot.tracked = false;
+      startFlags |= LOG_SS_STALE;
     }
     if(!NO_AUTO_STOP && scale.unitsOunces()){
       Serial.println("scale is set to ounces: shot left to the paddle");
       shot.tracked = false;
+      startFlags |= LOG_SS_OUNCES;
     }
+    if(shot.tracked && !NO_AUTO_STOP){
+      startFlags |= LOG_SS_WEIGHED;
+    }
+    logEvent(LOG_SHOT_START, startFlags, (int32_t)(goalWeight * 10) | ((int32_t)(weightOffset * 10 + 0.5f) << 16));
+    shotLastPacket_ms = millis();
+    shotMaxGap_ms = 0;
+    shotPackets = 0;
+    shotGaps = 0;
+    shotChecksum0 = scale.checksumErrors();
     if(!shot.tracked){
       setColor(MAGENTA);
       return;
@@ -545,6 +985,24 @@ void setBrewingState(bool brewing){
     scale.stopTimer();
     shot.learn = shot.tracked && !shot.disturbed && !NO_AUTO_STOP   // a manual shot teaches nothing
               && (!AUTOTARE || scale.tareState() == TARE_CONFIRMED);
+    {
+      uint8_t why = shot.end == ENDTYPE::TIME ? 0 : shot.end == ENDTYPE::WEIGHT ? 1
+                  : shot.end == ENDTYPE::BUTTON ? 2 : shot.end == ENDTYPE::DISCONNECT ? 3 : 4;
+      logEvent(LOG_SHOT_END, why, (int32_t)(shot.end_s * 1000));
+      unsigned long tail = millis() - shotLastPacket_ms;   // the stream may have stopped for good
+      if(shot.tracked && tail > shotMaxGap_ms){
+        shotMaxGap_ms = tail;
+      }
+      logEvent(LOG_SHOT_LINK, shotGaps, (int32_t)(shotPackets | (uint32_t)(shotMaxGap_ms > 0xFFFF ? 0xFFFF : shotMaxGap_ms) << 16));
+      unsigned long bad = scale.checksumErrors() - shotChecksum0;
+      float peak = shot.peakFlow < 0 ? 0 : shot.peakFlow > 600 ? 600 : shot.peakFlow;
+      uint8_t quality = (lastTareState == TARE_CONFIRMED ? LOG_SQ_TARED : 0)   // as last seen: a lost link clears the library's
+                      | (shot.disturbed ? LOG_SQ_DISTURBED : 0) | (shot.learn ? LOG_SQ_LEARN : 0);
+      logEvent(LOG_SHOT_QUALITY, quality, (int32_t)((bad > 0xFFFF ? 0xFFFF : bad) | (uint32_t)(peak * 100) << 16));
+      if(autoStop){
+        logEvent(LOG_INTERLOCK, 1, 0);
+      }
+    }
     Serial.print("shot summary: ");
     Serial.print(shot.end_s);
     Serial.print(" s, peak flow ");
@@ -807,6 +1265,7 @@ void paddleInterlock_task(){
   if(interlockReleased){
     interlockReleased = false;
     Serial.println("paddle off, interlock closed");
+    logEvent(LOG_INTERLOCK, 0, 0);
     // With the J3 and J4 plugs swapped, opening the interlock cuts the paddle
     // off from the sense circuit: it reads "off" at once, the interlock closes,
     // and the machine brews again.
@@ -818,6 +1277,7 @@ void paddleInterlock_task(){
     }else if(newButtonState){
       swapSuspect = false;
       interlockFault = true;
+      logEvent(LOG_FAULT, 0, 0);
       Serial.println("FAULT: paddle read off right after a stop, then on again. J3 and J4 swapped?"
                      " Interlock disabled until restart: the paddle works by hand.");
     }
@@ -826,6 +1286,7 @@ void paddleInterlock_task(){
   if(INTERLOCK_MAX_BREW_S > 0 && !NO_AUTO_STOP && newButtonState && !interlockOpen && !interlockFault
   && now - paddleOnSince_ms > INTERLOCK_MAX_BREW_S * 1000UL){
     Serial.println("paddle on too long: stopping the brew");
+    logEvent(LOG_MAX_BREW, 0, 0);
     if(shot.brewing && scale.isConnected()){
       shot.brewing = false;
       shot.end = ENDTYPE::TIME;
@@ -848,6 +1309,7 @@ void paddleInterlock_events(){
     // a paddle-off so closely that the "off" may have been a dropout.
     bool late = millis() - paddleOnAt_ms > PADDLE_TRACK_LATE_MS;
     bool bounce = paddleOffEventSeen && millis() - lastPaddleOffEvent_ms < PADDLE_RETRACK_MS;
+    logEvent(LOG_PADDLE, late ? 2 : bounce ? 3 : 1, 0);
     if(late || bounce){
       Serial.println(late ? "noticed late: shot left to the paddle" : "right after a paddle-off: shot left to the paddle");
     }
@@ -858,6 +1320,7 @@ void paddleInterlock_events(){
   }
   else if(!newButtonState && buttonPressed){
     Serial.println("Paddle off");
+    logEvent(LOG_PADDLE, 0, 0);
     buttonPressed = false;
     lastPaddleOffEvent_ms = millis();
     paddleOffEventSeen = true;
@@ -875,6 +1338,7 @@ void peripheral_task(){
   if (weightCharacteristic.written()) {
     Serial.print("goal weight updated from ");
     Serial.print(goalWeight);
+    logEvent(LOG_GOAL, 0, weightCharacteristic.value());
     Serial.print(" to ");
     goalWeight = weightCharacteristic.value();
     Serial.println(goalWeight);
@@ -891,8 +1355,16 @@ void peripheral_task(){
     Serial.println(manualRequested ? "manual mode requested" : "brew-by-weight requested");
   }
   if (otaCharacteristic.written()) {
-    otaWindowEnd_ms = otaCharacteristic.value() ? millis() + OTA_REQUEST_WINDOW_S * 1000UL : 0;
-    Serial.println(otaCharacteristic.value() ? "OTA window requested" : "OTA window closed");
+    if(otaCharacteristic.value() == 2){
+      // Restart into the recovery firmware, once idle. A restart while idle
+      // neither starts nor stops a brew.
+      Serial.println("recovery requested");
+      recoveryWanted = 1;
+    }else{
+      otaWindowEnd_ms = otaCharacteristic.value() ? millis() + OTA_REQUEST_WINDOW_S * 1000UL : 0;
+      Serial.println(otaCharacteristic.value() ? "WiFi window requested" : "WiFi window closed");
+      logEvent(LOG_OTA, otaCharacteristic.value() ? LOG_OTA_REQUESTED : LOG_OTA_CLOSED, 0);
+    }
   }
 }
 
@@ -900,6 +1372,9 @@ void peripheral_task(){
 void scaleHealth_task(){
   int battery = scale.batteryPercent();
   if(battery != lastBattery){
+    if(battery >= 0 && (lastBattery < 0 || battery <= LOW_BATTERY_PCT)){
+      logEvent(LOG_BATTERY, (uint8_t)battery, 0);   // once per connection, then only while low
+    }
     lastBattery = battery;
     batteryCharacteristic.writeValue(battery < 0 ? 255 : battery);
     if(battery >= 0){
@@ -910,6 +1385,7 @@ void scaleHealth_task(){
   }
   if(scale.unitsOunces() && !unitWarned){
     unitWarned = true;
+    logEvent(LOG_OUNCES, 0, 0);
     Serial.println("scale is set to ounces: set it to grams for brew-by-weight");
   }
   timer_state ts = scale.timerState();
@@ -923,57 +1399,60 @@ void scaleHealth_task(){
   }
 }
 
-// Over-the-air updates. WiFi shares the radio with BLE, so it is only on
-// while nothing is happening: no shot, interlock closed, paddle off, and
-// inside the OTA window (after boot, or requested over BLE).
+// WiFi, for the event log page and the web route into recovery. It shares
+// the radio with BLE, so it is only on while nothing is happening: no shot,
+// interlock closed, paddle off, and inside the window (after boot, or
+// requested over BLE). Updates are loaded by the recovery firmware, not here.
 void ota_task(){
+  bool idle = !shot.brewing && !interlockOpen && !newButtonState;
+  recovery_task(idle);
 #if OTA_ENABLED
   static bool wifiOn = false;
-  static bool otaReady = false;
-  bool idle = !shot.brewing && !interlockOpen && !newButtonState;
+  static bool netReady = false;
   bool want = idle && (long)(otaWindowEnd_ms - millis()) > 0;
   if(want && !wifiOn){
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(OTA_HOSTNAME);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     wifiOn = true;
-    otaReady = false;
-    Serial.println("WiFi on for OTA");
+    netReady = false;
+    Serial.println("WiFi on");
+    logEvent(LOG_WIFI, 1, 0);
   }else if(!want && wifiOn){
-    if(otaReady){
-      ArduinoOTA.end();
+    if(netReady){
+      MDNS.end();
+#if EVENT_LOG
+      logServer.stop();
+#endif
     }
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
     wifiOn = false;
-    otaReady = false;
+    netReady = false;
     Serial.println("WiFi off");
+    logEvent(LOG_WIFI, 0, 0);
   }
-  if(wifiOn && !otaReady && WiFi.status() == WL_CONNECTED){
-    ArduinoOTA.setHostname(OTA_HOSTNAME);
-    ArduinoOTA.setPassword(OTA_PASSWORD);
-    ArduinoOTA.onStart([](){
-      // The paddle is off and the interlock closed (idle), so the machine
-      // stays under manual control while the board is being reflashed.
-      Serial.println("OTA update starting");
-    });
-    ArduinoOTA.onProgress([](unsigned int done, unsigned int total){
-      if(PADDLE_INTERLOCK){
-        esp_task_wdt_reset(); // flashing blocks loop() for longer than WATCHDOG_S
-      }
-    });
-    ArduinoOTA.onEnd([](){ Serial.println("OTA update done, rebooting"); });
-    ArduinoOTA.onError([](ota_error_t e){ Serial.print("OTA error "); Serial.println((int)e); });
-    ArduinoOTA.begin();
-    otaReady = true;
-    Serial.print("OTA ready: ");
-    Serial.print(OTA_HOSTNAME);
-    Serial.print(".local / ");
+  if(wifiOn && !netReady && WiFi.status() == WL_CONNECTED){
+    netReady = true;
+    logEvent(LOG_WIFI, 2, WiFi.RSSI());
+    MDNS.begin(OTA_HOSTNAME);   // http://shotstopper.local/
+#if EVENT_LOG
+    logServer.begin();
+    configTzTime(LOG_TZ, "pool.ntp.org");   // dates for the log
+#endif
+    Serial.print("WiFi ready: http://");
     Serial.println(WiFi.localIP().toString().c_str());
   }
-  if(otaReady){
-    ArduinoOTA.handle();
+#if EVENT_LOG
+  if(netReady){
+    logServer.handleClient();
+    static bool clockLogged = false;
+    if(!clockLogged && time(nullptr) > 1700000000){
+      clockLogged = true;
+      logEvent(LOG_CLOCK, 0, (int32_t)time(nullptr));
+    }
   }
+#endif
 #endif
 }
 
@@ -1000,6 +1479,7 @@ void scaleConnected_task(){
     finalPending = false;
     bool fresh = weightSeen && millis() - lastWeightRx_ms <= STREAM_STALE_MS;
     shotWeightCharacteristic.writeValue((finalTared && fresh) ? currentWeight : NAN);
+    logEvent(LOG_SHOT_WEIGHT, finalTared && fresh, (finalTared && fresh) ? (int32_t)lroundf(currentWeight * 100) : 0);
     if(finalTared && fresh){
       Serial.print("final shot weight ");
       Serial.println(currentWeight);
@@ -1012,6 +1492,24 @@ void scaleConnected_task(){
     currentWeight = scale.getWeight();
     lastWeightRx_ms = millis();
     weightSeen = true;
+    if(shot.brewing){
+      unsigned long gap = millis() - shotLastPacket_ms;
+      shotLastPacket_ms = millis();
+      if(shotPackets < 0xFFFF){
+        shotPackets++;
+      }
+      if(gap > shotMaxGap_ms){
+        shotMaxGap_ms = gap;
+      }
+      if(gap > LOG_GAP_MS){
+        if(shotGaps < 255){
+          shotGaps++;
+        }
+        if(shotGaps <= 6){   // the first few in full, the rest only counted
+          logEvent(LOG_GAP, shot.shotTimer > 255 ? 255 : (uint8_t)shot.shotTimer, (int32_t)gap);
+        }
+      }
+    }
 
     Serial.print(currentWeight);
 
@@ -1147,6 +1645,7 @@ void scaleConnected_task(){
   && !isnan(shot.lastWeight)
   && shot.shotTimer - shot.lastTime > READINGS_LOST_S){
     Serial.println("weight readings lost (cup lifted?)");
+    logEvent(LOG_READINGS_LOST, 0, 0);
     shot.brewing = false;
     shot.end = ENDTYPE::DISCONNECT;
     setBrewingState(shot.brewing);
@@ -1195,11 +1694,13 @@ void scaleConnected_task(){
 
     if( abs(currentWeight - goalWeight + weightOffset) > MAX_OFFSET ){
       Serial.print("g. Error assumed. Offset unchanged. ");
+      logEvent(LOG_OFFSET, 0, (int32_t)lroundf(weightOffset * 10));
     }
     else{
       Serial.print("g. Next time I'll create an offset of ");
       weightOffset += currentWeight - goalWeight;
       Serial.print(weightOffset);
+      logEvent(LOG_OFFSET, 1, (int32_t)lroundf(weightOffset * 10));
 
       EEPROM.write(OFFSET_ADDR, weightOffset*10); //1 byte, 0-255
       EEPROM.commit();

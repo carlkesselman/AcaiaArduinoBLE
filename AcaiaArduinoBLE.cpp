@@ -66,6 +66,7 @@ AcaiaArduinoBLE* AcaiaArduinoBLE::_instance = nullptr;
 
 AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug){
     _debug = debug;
+    _onEvent = nullptr;
     _currentWeight = 0;
     _newWeight = false;
     _connected = false;
@@ -96,10 +97,21 @@ AcaiaArduinoBLE::AcaiaArduinoBLE(bool debug){
 // Called after a connection has been made but setup failed. Always drop the
 // link: a scale that stays connected stops advertising and can never be found
 // again by the next scan.
-bool AcaiaArduinoBLE::fail(BLEDevice& peripheral, const char* msg){
+bool AcaiaArduinoBLE::fail(BLEDevice& peripheral, const char* msg, int step){
     Serial.println(msg);
     peripheral.disconnect();
+    event(SCALE_EVENT_SETUP_FAILED, step);
     return false;
+}
+
+void AcaiaArduinoBLE::onEvent(scale_event_callback callback){
+    _onEvent = callback;
+}
+
+void AcaiaArduinoBLE::event(scale_event e, long detail){
+    if(_onEvent){
+        _onEvent(e, detail);
+    }
 }
 
 bool AcaiaArduinoBLE::init(String mac){
@@ -154,11 +166,13 @@ bool AcaiaArduinoBLE::init(String mac){
         BLE.stopScan();
         _scanning = false;
 
+        int rssi = peripheral.rssi();   // from the advertisement
         Serial.println("Connecting ...");
         if (peripheral.connect()) {
             Serial.println("Connected");
         } else {
             Serial.println("Failed to connect!");
+            event(SCALE_EVENT_CONNECT_FAILED);
             return false;
         }
 
@@ -167,7 +181,7 @@ bool AcaiaArduinoBLE::init(String mac){
         if (peripheral.discoverAttributes()) {
             Serial.println("Attributes discovered");
         } else {
-            return fail(peripheral, "Attribute discovery failed!");
+            return fail(peripheral, "Attribute discovery failed!", 5);
         }
 
         if(_debug){
@@ -209,11 +223,11 @@ bool AcaiaArduinoBLE::init(String mac){
             _read   = peripheral.characteristic(READ_CHAR_FELICITA);
         }
         else{
-            return fail(peripheral, "unable to determine scale type");
+            return fail(peripheral, "unable to determine scale type", 6);
         }
 
         if(!_write){
-            return fail(peripheral, "write characteristic not found");
+            return fail(peripheral, "write characteristic not found", 7);
         }
 
         if(_debug){
@@ -254,25 +268,25 @@ bool AcaiaArduinoBLE::init(String mac){
         _read.setEventHandler(BLEUpdated, onNotify);
 
         if(!_read.canSubscribe()){
-            return fail(peripheral, "unable to subscribe to READ");
+            return fail(peripheral, "unable to subscribe to READ", 1);
         }else if(!_read.subscribe()){
-            return fail(peripheral, "subscription failed");
+            return fail(peripheral, "subscription failed", 1);
         }else {
             Serial.println("subscribed!");
         }
 
         if(_type == OLD || _type == NEW){
             if(!writeCommand(IDENTIFY, sizeof(IDENTIFY), true, "identify")){
-                return fail(peripheral, "identify write failed");
+                return fail(peripheral, "identify write failed", 2);
             }
             if(!writeCommand(NOTIFICATION_REQUEST, sizeof(NOTIFICATION_REQUEST), true, "notification request")){
-                return fail(peripheral, "notification request write failed");
+                return fail(peripheral, "notification request write failed", 3);
             }
         }else if(_type == FELICITA){
             // Wake the Felicita into a deterministic, known-good mode
             // (weight + timer) instead of whatever IDENTIFY used to leave it in.
             if(!writeCommand(WEIGHT_TIMER_MODE_FELICITA, sizeof(WEIGHT_TIMER_MODE_FELICITA), true, "felicita mode")){
-                return fail(peripheral, "felicita mode set failed");
+                return fail(peripheral, "felicita mode set failed", 4);
             }
         }
 
@@ -283,6 +297,7 @@ bool AcaiaArduinoBLE::init(String mac){
         // is detected instead of looking "connected" forever.
         _lastPacket = millis();
         Serial.println("scale ready");
+        event(SCALE_EVENT_READY, rssi);
         return true;
     }while(millis() - start < 100);
 
@@ -330,6 +345,9 @@ bool AcaiaArduinoBLE::writeCommand(const uint8_t* data, int length, bool withRes
     }
     Serial.print(name);
     Serial.println(" write failed");
+    if(_connected){
+        event(SCALE_EVENT_WRITE_FAILED);
+    }
     // A failed write means the link is gone or broken. Tear it down fully so
     // the scale starts advertising again and the next init() can find it.
     if(_connected){
@@ -369,9 +387,11 @@ void AcaiaArduinoBLE::updateTare(){
         Serial.print("tare not confirmed, retrying (");
         Serial.print(_tareRetries);
         Serial.println(")");
+        event(SCALE_EVENT_TARE_RETRY, _tareRetries);
         sendTare();
     }else{
         Serial.println("tare failed");
+        event(SCALE_EVENT_TARE_FAILED);
         _tareState = TARE_FAILED;
     }
 }
@@ -436,10 +456,12 @@ void AcaiaArduinoBLE::updateTimer(){
     if(_timerRetries < TIMER_MAX_RETRIES){
         _timerRetries++;
         Serial.println("scale timer not running, re-sending reset + start");
+        event(SCALE_EVENT_TIMER_RETRY, _timerRetries);
         sendResetTimer();
         sendStartTimer();
     }else{
         Serial.println("scale timer failed to start");
+        event(SCALE_EVENT_TIMER_FAILED);
         _timerState = TIMER_FAILED;
     }
 }
@@ -574,6 +596,7 @@ bool AcaiaArduinoBLE::newWeightAvailable(){
 
     if(!_peripheral.connected()){
         Serial.println("link lost");
+        event(SCALE_EVENT_LINK_LOST, millis() - _lastPacket);
         disconnect();
         return false;
     }
@@ -581,6 +604,7 @@ bool AcaiaArduinoBLE::newWeightAvailable(){
     // check how long its been since we last got a weight packet
     if(millis() - _lastPacket > MAX_PACKET_PERIOD_MS){
         Serial.println("timeout!");
+        event(SCALE_EVENT_TIMEOUT, millis() - _lastPacket);
         disconnect();
         return false;
     }

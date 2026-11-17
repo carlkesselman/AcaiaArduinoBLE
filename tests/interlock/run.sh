@@ -16,7 +16,7 @@ mkdir -p build/fw
 sed 's/\r$//; s/unsigned long/uint32_t/g' $ROOT/AcaiaArduinoBLE.cpp > build/fw/AcaiaArduinoBLE.cpp
 sed 's/\r$//; s/unsigned long/uint32_t/g' $ROOT/AcaiaArduinoBLE.h > build/fw/AcaiaArduinoBLE.h
 sed 's/unsigned long/uint32_t/g; s/1000ULL/1000u/g' $ROOT/examples/shotStopper/shotStopper.ino > build/fw/shotStopper.ino.h
-$CXX -std=c++17 -g -Istubs -Ibuild -Ibuild/fw -DPADDLE_INTERLOCK=true -DMOMENTARY=false -DARDUINO_ESP32C3_DEV \
+$CXX -std=c++17 -g -Istubs -Ibuild -Ibuild/fw -I$ROOT/examples/shotStopper -DPADDLE_INTERLOCK=true -DMOMENTARY=false -DARDUINO_ESP32C3_DEV \
   -w harness.cpp build/fw/AcaiaArduinoBLE.cpp -o build/harness
 if [ -n "$1" ]; then
   exec build/harness "$@"

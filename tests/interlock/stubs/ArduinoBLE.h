@@ -39,7 +39,7 @@ public:
   String address() { return "00:00"; } String localName(); String advertisedServiceUuid() { return ""; }
   String deviceName() { return ""; } int appearance() { return 0; }
   int serviceCount() { return 0; } BLEService service(int) { return BLEService(); }
-  bool connect(); bool discoverAttributes(); bool connected(); bool disconnect();
+  bool connect(); bool discoverAttributes(); bool connected(); bool disconnect(); int rssi() { return -60; }
   BLECharacteristic characteristic(const char* uuid);
 };
 struct BLEByteCharacteristic : BLECharacteristic {

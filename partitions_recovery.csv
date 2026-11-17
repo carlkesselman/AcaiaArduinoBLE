@@ -1,0 +1,16 @@
+# ShotStopper Micra Interlock, 4 MB flash: a fixed recovery firmware plus one
+# slot for the main firmware. See examples/shotStopper/README.md, "Updates".
+#
+#  factory  the recovery firmware (recovery/). Flashed once over USB, never
+#           written again: nothing that runs on the board can overwrite it.
+#  app0     the main firmware. Written only by the recovery firmware (over
+#           WiFi), or over USB.
+#  spiffs   the event log, used raw (not a filesystem).
+#
+# Name,   Type, SubType, Offset,   Size, Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+factory,  app,  factory, 0x10000,  0x100000,
+app0,     app,  ota_0,   0x110000, 0x2C0000,
+spiffs,   data, spiffs,  0x3D0000, 0x20000,
+coredump, data, coredump,0x3F0000, 0x10000,

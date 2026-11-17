@@ -93,6 +93,26 @@ enum timer_state{
     TIMER_UNVERIFIED  // the scale doesn't report its timer; can't be checked
 };
 
+// Reported to the callback set with onEvent(), for logging. `detail` is:
+//  SCALE_EVENT_READY          RSSI in dBm when the scale was found (0 if unknown)
+//  SCALE_EVENT_SETUP_FAILED   step: 1 subscribe, 2 identify, 3 notification request, 4 mode set,
+//                             5 attribute discovery, 6 scale type, 7 write characteristic
+//  SCALE_EVENT_LINK_LOST, SCALE_EVENT_TIMEOUT   ms since the last weight packet
+//  SCALE_EVENT_TARE_RETRY, SCALE_EVENT_TIMER_RETRY   retry number
+enum scale_event{
+    SCALE_EVENT_READY,
+    SCALE_EVENT_CONNECT_FAILED,
+    SCALE_EVENT_SETUP_FAILED,
+    SCALE_EVENT_LINK_LOST,
+    SCALE_EVENT_TIMEOUT,
+    SCALE_EVENT_WRITE_FAILED,
+    SCALE_EVENT_TARE_RETRY,
+    SCALE_EVENT_TARE_FAILED,
+    SCALE_EVENT_TIMER_RETRY,
+    SCALE_EVENT_TIMER_FAILED
+};
+typedef void (*scale_event_callback)(scale_event event, long detail);
+
 class AcaiaArduinoBLE{
     public:
         AcaiaArduinoBLE(bool debug);
@@ -122,9 +142,10 @@ class AcaiaArduinoBLE{
         bool unitsOunces();                // true if the scale reported it is set to ounces
         bool hasScaleFlowRate();           // the scale itself reports flow (BooKoo)
         float scaleFlowRate();             // g/s reported by the scale, NAN if not available
+        void onEvent(scale_event_callback callback); // called from init() and newWeightAvailable()
     private:
         bool isScaleName(String);
-        bool fail(BLEDevice& peripheral, const char* msg);
+        bool fail(BLEDevice& peripheral, const char* msg, int step);
         bool writeCommand(const uint8_t* data, int length, bool withResponse, const char* name);
         void waitForCommandGap();
         bool sendTare();
@@ -161,6 +182,8 @@ class AcaiaArduinoBLE{
         unsigned long       _scanStarted;
         scale_type          _type;
         bool                _debug;
+        scale_event_callback _onEvent;
+        void                event(scale_event e, long detail = 0);
         unsigned long       _packetPeriod;
         unsigned long       _lastPacket;
 

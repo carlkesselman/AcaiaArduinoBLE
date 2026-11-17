@@ -6,3 +6,4 @@ void paddleInterlock_task(); void paddleInterlock_events(); void peripheral_task
 
 float shotElapsed_s(); void paddleTick(void*); void startPaddleTimer();
 void status_task();
+void log_task(); void logScaleSession();
